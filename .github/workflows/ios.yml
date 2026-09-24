@@ -91,8 +91,13 @@ jobs:
         run: |
           cd build/ios
           xcodebuild -project jape.xcodeproj -scheme jape -configuration Release \
-            -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO | tail -30
+            -destination 'generic/platform=iOS' -derivedDataPath $RUNNER_TEMP/dd \
+            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO | tail -30
           test ${PIPESTATUS[0]} -eq 0
+          # EOS SDK(動的フレームワーク)がアプリに同梱されていないと、起動した瞬間に落ちる
+          app=$(find $RUNNER_TEMP/dd -name "*.app" -type d | head -1)
+          ls "$app/Frameworks"
+          test -d "$app/Frameworks/EOSSDK.framework"
       - name: アーカイブと IPA 作成
         if: steps.signing.outputs.enabled == 'true'
         run: |
@@ -111,6 +116,8 @@ jobs:
             <key>provisioningProfiles</key><dict><key>com.jape.game</key><string>$PROFILE_UUID</string></dict>
           </dict></plist>
           EOT
+          ls "$RUNNER_TEMP/jape.xcarchive/Products/Applications/"*.app/Frameworks
+          test -d "$(ls -d $RUNNER_TEMP/jape.xcarchive/Products/Applications/*.app)/Frameworks/EOSSDK.framework"
           xcodebuild -exportArchive -archivePath $RUNNER_TEMP/jape.xcarchive \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist -exportPath $RUNNER_TEMP/ipa
           ls $RUNNER_TEMP/ipa
