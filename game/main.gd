@@ -8,7 +8,7 @@ extends Node3D
 ##   --sim             画面なしで試合を最後まで回し、結果を表示して終了(詰まりがあれば終了コード1)
 ##   --seed=N          乱数の種(再現用)
 
-const VIEW_TILES_Y := 12.0
+const VIEW_TILES_Y_ORIGINAL := 12.0   ## 原作の画面は縦12マス【動画】
 const GROUND_MARGIN := 3.0      ## 足場を画面下から何マス上に見せるか(タッチボタンと重ならないように)
 const FOV := 30.0
 const ROUND_END_WAIT := 3.0
@@ -159,15 +159,15 @@ func _physics_process(dt: float) -> void:
 
 
 func _process(_dt: float) -> void:
-	var dist := (VIEW_TILES_Y * 0.5) / tan(deg_to_rad(FOV * 0.5))
+	var dist := (ControlSettings.view_tiles * 0.5) / tan(deg_to_rad(FOV * 0.5))
 	var p := players[0]
 	# 縦のカメラ: 原作と同じく、普通のジャンプでは動かさない。
 	# 最後に立った足場を画面下から GROUND_MARGIN マスの位置に置き、画面上端に近づいたときだけ上げる
 	if p.is_on_floor() or _cam_floor_y < 0.0:
 		_cam_floor_y = p.position.y
-	var cy := _cam_floor_y + VIEW_TILES_Y * 0.5 - GROUND_MARGIN
-	cy = maxf(cy, p.position.y + p.height() + 1.5 - VIEW_TILES_Y * 0.5)   # 頭が上端に近づいたら追う
-	cy = clampf(cy, VIEW_TILES_Y * 0.5 - GROUND_MARGIN, stage.height - VIEW_TILES_Y * 0.5 + 1.0)
+	var cy := _cam_floor_y + ControlSettings.view_tiles * 0.5 - GROUND_MARGIN
+	cy = maxf(cy, p.position.y + p.height() + 1.5 - ControlSettings.view_tiles * 0.5)   # 頭が上端に近づいたら追う
+	cy = clampf(cy, ControlSettings.view_tiles * 0.5 - GROUND_MARGIN, stage.height - ControlSettings.view_tiles * 0.5 + 1.0)
 	cy = lerpf(camera.position.y if camera.position.y != 0.0 else cy, cy, 0.1)
 	var cx := p.position.x
 	if absf(cx - camera.position.x) > stage.width * 0.5:

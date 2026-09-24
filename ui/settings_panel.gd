@@ -59,6 +59,8 @@ func _build() -> void:
 	_slider(box, "Height", 0.5, 0.9, ControlSettings.pad_y, func(v: float) -> void:
 		ControlSettings.pad_y = v
 		ControlSettings.changed.emit())
+	_slider(box, "Zoom (tiles on screen, original=12)", 7.0, 12.0, ControlSettings.view_tiles, func(v: float) -> void:
+		ControlSettings.view_tiles = v)
 	var vib := CheckButton.new()
 	vib.text = "Vibration"
 	vib.button_pressed = ControlSettings.vibration

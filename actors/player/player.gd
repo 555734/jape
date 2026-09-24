@@ -49,15 +49,14 @@ func _ready() -> void:
 	add_child(_model)
 	_body = Assets.spawn(Assets.CHARACTER, BIG_HEIGHT)
 	_model.add_child(_body)
-	if index == 1:
-		_recolor(_body)
+	Assets.paint_player(_body, index)
 	_ap = Assets.find_anim_player(_body)
 	if _ap:
-		for key in ["Idle", "Walk", "Run", "Jump", "Jump_Idle", "Jump_Land", "HitReact", "Duck"]:
+		for key in ["Idle", "Walk", "Run", "Jump", "RecieveHit", "Roll"]:
 			var n := Assets.anim_name(_ap, key)
 			if n != &"":
 				_anims[key] = n
-				if key in ["Idle", "Walk", "Run", "Jump_Idle", "Duck"]:
+				if key in ["Idle", "Walk", "Run"]:
 					_ap.get_animation(n).loop_mode = Animation.LOOP_LINEAR
 	_dust = _make_dust()
 	add_child(_dust)
@@ -218,7 +217,8 @@ func _update_visual(delta: float) -> void:
 		sy = 0.75
 	if st == PlayerMoves.State.CROUCH:
 		sy = 0.6
-	_model.scale = Vector3(base * (2.0 - sy) if sy < 1.0 else base, base * sy, base)
+	var thick := base * 1.2   # 細い手足でも小さい画面で読み取れるよう、横と奥行きを少し太くする
+	_model.scale = Vector3(thick * (2.0 - sy) if sy < 1.0 else thick, base * sy, thick)
 
 	# 砂ぼこり: ダッシュ・切り返し・壁すべり
 	var fast := is_on_floor() and absf(velocity.x) > Tuning.WALK_SPEED + 1.0
@@ -235,22 +235,22 @@ func _play_anim(st: int) -> void:
 	var key := "Idle"
 	var speed := 1.0
 	match st:
-		PlayerMoves.State.CROUCH, PlayerMoves.State.GROUND_POUND, PlayerMoves.State.GP_LAND:
-			key = "Duck"
+		PlayerMoves.State.GROUND_POUND, PlayerMoves.State.CROUCH, PlayerMoves.State.WALL_SLIDE:
+			key = "Jump"
+		PlayerMoves.State.GP_LAND:
+			key = "Idle"
 		PlayerMoves.State.SKID:
-			key = "Jump_Land"
-		PlayerMoves.State.WALL_SLIDE:
-			key = "Jump_Idle"
+			key = "Idle"
 		_:
 			var vx := absf(velocity.x)
 			if not is_on_floor():
-				key = "Jump_Idle"
+				key = "Jump"
 			elif vx > Tuning.WALK_SPEED + 0.5:
 				key = "Run"
-				speed = clampf(vx / Tuning.RUN_SPEED * 1.4, 0.9, 1.6)
+				speed = clampf(vx / Tuning.RUN_SPEED * 1.25, 0.9, 1.5)
 			elif vx > 0.2:
 				key = "Walk"
-				speed = clampf(vx / Tuning.WALK_SPEED * 1.3, 0.6, 1.6)
+				speed = clampf(vx / Tuning.WALK_SPEED * 1.2, 0.6, 1.5)
 	var n: StringName = _anims.get(key, &"")
 	if n != &"" and _ap.current_animation != n:
 		_ap.play(n, 0.08)
@@ -284,18 +284,3 @@ func _make_dust() -> CPUParticles3D:
 	mesh.material = mat
 	p.mesh = mesh
 	return p
-
-
-## 2P用: 色相をずらして赤系にする
-func _recolor(n: Node3D) -> void:
-	for m in n.find_children("*", "MeshInstance3D", true, false):
-		var mesh: Mesh = (m as MeshInstance3D).mesh
-		for s in mesh.get_surface_count():
-			var mat := mesh.surface_get_material(s)
-			if mat is BaseMaterial3D:
-				var c: Color = mat.albedo_color
-				if c.s < 0.3:
-					continue
-				var dup: BaseMaterial3D = mat.duplicate()
-				dup.albedo_color = Color.from_hsv(fposmod(c.h + 0.45, 1.0), c.s, c.v, c.a)
-				(m as MeshInstance3D).set_surface_override_material(s, dup)

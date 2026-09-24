@@ -11,6 +11,7 @@ var opacity := 0.55        ## ボタンの濃さ
 var dpad_x := 0.14         ## 十字キーの横位置(画面幅に対する割合)。ボタンは左右対称
 var pad_y := 0.8          ## 十字キー・ボタンの縦位置
 var vibration := true
+var view_tiles := 10.0     ## 画面に映す縦のマス数(原作は12。スマホで見やすいよう標準は10)
 
 ## 調整パネルで変えられる動きの数値(Tuning の変数名)
 const TUNABLE := {
@@ -44,6 +45,7 @@ func load_settings() -> void:
 	dpad_x = cfg.get_value("controls", "dpad_x", dpad_x)
 	pad_y = cfg.get_value("controls", "pad_y", pad_y)
 	vibration = cfg.get_value("controls", "vibration", vibration)
+	view_tiles = cfg.get_value("controls", "view_tiles", view_tiles)
 	for key in TUNABLE:
 		if cfg.has_section_key("tuning", key):
 			Tuning.set_value(key, float(cfg.get_value("tuning", key)))
@@ -57,6 +59,7 @@ func save_settings() -> void:
 	cfg.set_value("controls", "dpad_x", dpad_x)
 	cfg.set_value("controls", "pad_y", pad_y)
 	cfg.set_value("controls", "vibration", vibration)
+	cfg.set_value("controls", "view_tiles", view_tiles)
 	for key in TUNABLE:
 		cfg.set_value("tuning", key, Tuning.get_value(key))
 	cfg.save(PATH)
