@@ -2,3 +2,10 @@
 *.import
 assets_src/**/tripo/preview/
 build/
+# EOSG プラグイン(tools/eos/fetch_eosg.sh で取得する。大きなバイナリをリポジトリに入れない)
+addons/epic-online-services-godot/
+# EOS の認証情報(CI が GitHub Secrets から作る。絶対にコミットしない)
+net/eos_secrets.gd
+net/eos_secrets.gd.uid
+# Android の Gradle ビルドテンプレート(CI が展開する)
+android/

@@ -68,7 +68,7 @@ func _ready() -> void:
 	camera.current = true
 	hud = Hud.new()
 	add_child(hud)
-	var online := _args.has("host") or _args.has("join")
+	var online := _args.has("host") or _args.has("join") or Online.has_match()
 	if not _args.has("cpu-both") and not _args.has("sim"):
 		if ControlSettings.control_mode == "buttons":
 			add_child(TouchControls.new())
@@ -86,6 +86,8 @@ func _ready() -> void:
 
 	if online:
 		_setup_online()
+		if not _args.has("sim"):
+			_add_leave_button()
 		return
 	_build_world(_rng.randi())
 	if _args.has("demo-moves"):
@@ -136,7 +138,7 @@ class _Capturer extends Node:
 
 
 func _physics_process(_dt: float) -> void:
-	if _net != null:
+	if _online:
 		_online_tick()
 		return
 	_time += Simulation.DT
@@ -152,42 +154,44 @@ func _physics_process(_dt: float) -> void:
 
 
 # ---- 通信対戦 -----------------------------------------------------------
-## 開発用の起動オプション:
-##   --host[=ポート]                 部屋を作って相手を待つ(1P になる)
+## 相手とつなぐのは Online(net/online.gd)。タイトル画面でつながってからこの画面に来るか、
+## 開発用の起動オプションでここから Online に頼む:
+##   --host[=ポート]                 同じPC・同じWi-Fi 用。部屋を作って相手を待つ(1P になる)
 ##   --join=アドレス[:ポート]        部屋に入る(2P になる)
 ##   --net-lag=ms --net-jitter=ms --net-loss=0〜1   わざと回線を悪くする
 ##   --cpu-both と組み合わせると自分側も CPU が操作する(2窓で自動対戦)
 
 const DISCONNECT_TICKS := 180   ## この間(3秒)何も届かなければ切断とみなす
 
-var _net: UdpTransport
+var _online := false
 var _session: RollbackSession
+var _transport: NetTransport
 var _net_state := ""            ## "" / "waiting" / "playing" / "lost" / "desync"
+var _leave_button: Button
 
 
 func _setup_online() -> void:
-	_net = UdpTransport.new()
-	var err: Error
+	_online = true
+	_net_state = "waiting"
+	if Online.has_match():
+		return
 	if _args.has("host"):
 		var port := int(_args["host"]) if _args["host"] != "" else UdpTransport.DEFAULT_PORT
-		err = _net.host(port, _rng.randi() | 1, int(_args.get("net-delay", "2")))
 		print("NET host port=%d" % port)
-	else:
+		Online.host_lan(port)
+	elif _args.has("join"):
 		var parts: PackedStringArray = (_args["join"] as String).split(":")
 		var port := int(parts[1]) if parts.size() > 1 else UdpTransport.DEFAULT_PORT
-		err = _net.join(parts[0], port)
 		print("NET join %s:%d" % [parts[0], port])
-	if err != OK:
-		push_error("NET 接続を始められません: %s" % error_string(err))
-	_net_state = "waiting"
+		Online.join_lan(parts[0], port)
 
 
 func _online_tick() -> void:
-	_net.update()
 	if _session == null:
-		_net.poll()   # 接続の手続きだけ進める(試合前に届いた入力は、相手がまた送ってくる)
-		if _net.connected:
-			_start_online()
+		if Online.has_match():
+			_start_online(Online.take_match())
+		elif Online.state == "error":
+			_net_state = "lost"
 		return
 	_time += Simulation.DT
 	var input: PlayerInput = input_sources[_session.local].call()
@@ -203,31 +207,55 @@ func _online_tick() -> void:
 			_sim_finish()
 
 
-func _start_online() -> void:
-	var local := 0 if _net.is_host else 1
-	_build_world(_net.match_seed)
+func _start_online(m: Dictionary) -> void:
+	var local: int = m.local
+	_build_world(m.seed)
 	ControlSettings.use_default_tuning()   # 両方の端末で同じ動きの数値にする(保存はしない)
 	cam_index = local
-	var transport: NetTransport = _net
+	_transport = m.transport
+	var transport := _transport
 	if _args.has("net-lag") or _args.has("net-loss"):
-		transport = LagTransport.new(_net, int(_args.get("net-lag", "0")), int(_args.get("net-jitter", "0")),
+		transport = LagTransport.new(_transport, int(_args.get("net-lag", "0")), int(_args.get("net-jitter", "0")),
 			float(_args.get("net-loss", "0")))
-	_session = RollbackSession.new(sim, local, transport, _net.input_delay)
+	_session = RollbackSession.new(sim, local, transport, m.delay)
 	if _args.has("cpu-both") or _args.has("sim"):
 		_attach_cpu(local)
 	_net_state = "playing"
-	print("NET start as %dP seed=%d delay=%d" % [local + 1, _net.match_seed, _net.input_delay])
+	print("NET start (%s) as %dP seed=%d delay=%d" % [m.kind, local + 1, m.seed, m.delay])
+
+
+## 通信対戦をやめてタイトルへ戻る
+func _leave_online() -> void:
+	Online.leave()
+	get_tree().change_scene_to_file("res://ui/title.tscn")
+
+
+## 右上の「退出」ボタン(通信対戦のときだけ)
+func _add_leave_button() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 10
+	add_child(layer)
+	_leave_button = Button.new()
+	_leave_button.text = " 退出 "
+	_leave_button.add_theme_font_size_override("font_size", 28)
+	_leave_button.pressed.connect(_leave_online)
+	layer.add_child(_leave_button)
+	var place := func() -> void:
+		var vs := get_viewport().get_visible_rect().size
+		_leave_button.position = Vector2(vs.x - 130, 70)
+	get_viewport().size_changed.connect(place)
+	place.call()
 
 
 ## 通信の状態(画面の隅に出す)
 func _net_status() -> String:
-	if _net == null:
+	if not _online:
 		return ""
 	match _net_state:
 		"waiting":
-			return "接続を待っています…" if _net.is_host else "接続中…"
+			return Online.status if Online.status != "" else "接続を待っています…"
 		"lost":
-			return "通信が切れました"
+			return "通信が切れました\n「退出」でタイトルへ" if _session != null else Online.status
 		"desync":
 			return "同期がずれました (frame %d)" % _session.desync_frame
 	return "ping %d ms  巻き戻し %d" % [roundi(_session.rtt * 1000.0 / 60.0), _session.rollbacks]

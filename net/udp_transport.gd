@@ -54,6 +54,8 @@ func send(bytes: PackedByteArray) -> void:
 
 func poll() -> Array[PackedByteArray]:
 	var out: Array[PackedByteArray] = []
+	if is_host:
+		_server.poll()   # 部屋側は、これを呼ぶと相手からのデータが _udp に届く
 	if not _udp.is_socket_connected():
 		return out
 	while _udp.get_available_packet_count() > 0:
@@ -85,3 +87,9 @@ func poll() -> Array[PackedByteArray]:
 func _send_raw(bytes: PackedByteArray) -> void:
 	if _udp.is_socket_connected():
 		_udp.put_packet(bytes)
+
+
+func close() -> void:
+	connected = false
+	_udp.close()
+	_server.stop()

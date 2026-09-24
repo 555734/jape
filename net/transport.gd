@@ -13,3 +13,8 @@ func send(_bytes: PackedByteArray) -> void:
 ## 届いているデータを全部取り出す
 func poll() -> Array[PackedByteArray]:
 	return []
+
+
+## 通信を閉じる
+func close() -> void:
+	pass

@@ -16,6 +16,8 @@ jobs:
         run: |
           curl -sSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
           unzip -q godot.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+      - name: EOSG(通信対戦のプラグイン)を取得
+        run: bash tools/eos/fetch_eosg.sh linux
       - name: 素材の読み込み(import)
         run: godot --headless --path . --import
       - name: テスト
