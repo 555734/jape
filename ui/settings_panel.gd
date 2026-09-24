@@ -1,17 +1,24 @@
 class_name SettingsPanel
 extends CanvasLayer
-## 右上の歯車ボタンで開く調整パネル。ボタンの大きさ・位置・振動と、動きの数値を実機で変えられる。
-## 開いている間はゲームを一時停止する。
+## 右上の「設定」ボタンで開く調整パネル(日本語)。開いている間はゲームを一時停止する。
+##   ・操作方式、ボタン/スティックの大きさ・濃さ・位置、カメラの寄り、振動
+##   ・動きの数値(ジャンプの高さ・重力など)
+##   ・「設定をコピー」: 全部の数値を文字でコピー。チャットに貼れば開発側で読める
+##   ・「貼り付けて読み込む」: コピーした文字を読み込む
+##   ・「不具合報告をコピー」: 今の位置・状態・描画方式・GPU名などをコピー
+
+var report_source: Callable   ## 不具合報告の文字を返す関数(main.gd が設定)
 
 var _panel: PanelContainer
 var _gear: Button
+var _msg: Label
 
 
 func _ready() -> void:
 	layer = 10
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_gear = Button.new()
-	_gear.text = " SET "
+	_gear.text = " 設定 "
 	_gear.add_theme_font_size_override("font_size", 28)
 	_gear.pressed.connect(_toggle)
 	add_child(_gear)
@@ -22,9 +29,9 @@ func _ready() -> void:
 
 func _layout() -> void:
 	var vs := get_viewport().get_visible_rect().size
-	_gear.position = Vector2(vs.x - 90, 70)
-	_panel.position = Vector2(vs.x * 0.12, vs.y * 0.05)
-	_panel.size = Vector2(vs.x * 0.76, vs.y * 0.9)
+	_gear.position = Vector2(vs.x - 110, 70)
+	_panel.position = Vector2(vs.x * 0.1, vs.y * 0.04)
+	_panel.size = Vector2(vs.x * 0.8, vs.y * 0.92)
 
 
 func _toggle() -> void:
@@ -32,6 +39,14 @@ func _toggle() -> void:
 	get_tree().paused = _panel.visible
 	if not _panel.visible:
 		ControlSettings.save_settings()
+
+
+func _rebuild() -> void:
+	var was := _panel.visible
+	_panel.queue_free()
+	_build()
+	_layout()
+	_panel.visible = was
 
 
 func _build() -> void:
@@ -46,57 +61,90 @@ func _build() -> void:
 	box.add_theme_constant_override("separation", 10)
 	scroll.add_child(box)
 
-	_title(box, "CONTROLS")
-	_slider(box, "Button size", 0.6, 1.6, ControlSettings.size_scale, func(v: float) -> void:
+	var top := HBoxContainer.new()
+	box.add_child(top)
+	_button(top, "閉じる", _toggle)
+	_button(top, "設定をコピー", func() -> void:
+		DisplayServer.clipboard_set(ControlSettings.export_text())
+		_msg.text = "コピーしました。チャットに貼り付けて送ってください")
+	_button(top, "貼り付けて読み込む", func() -> void:
+		if ControlSettings.import_text(DisplayServer.clipboard_get()):
+			_rebuild()
+			_msg.text = "読み込みました"
+		else:
+			_msg.text = "読み込めませんでした(「設定をコピー」で作った文字をコピーしてから押してください)")
+	_button(top, "不具合報告をコピー", func() -> void:
+		var text := "JAPE_REPORT\n" + ControlSettings.export_text()
+		if report_source.is_valid():
+			text += "\n" + str(report_source.call())
+		DisplayServer.clipboard_set(text)
+		_msg.text = "不具合報告をコピーしました。チャットに貼り付けて送ってください")
+	_msg = Label.new()
+	_msg.add_theme_font_size_override("font_size", 22)
+	_msg.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
+	box.add_child(_msg)
+
+	_title(box, "操作")
+	var mode := OptionButton.new()
+	mode.add_item("左スティック + 右タップ")
+	mode.add_item("DS配置のボタン")
+	mode.selected = 0 if ControlSettings.control_mode == "stick" else 1
+	mode.add_theme_font_size_override("font_size", 24)
+	mode.item_selected.connect(func(i: int) -> void:
+		ControlSettings.control_mode = "stick" if i == 0 else "buttons"
+		ControlSettings.save_settings())
+	box.add_child(mode)
+	_slider(box, "スティック/ボタンの大きさ", 0.6, 1.6, ControlSettings.size_scale, func(v: float) -> void:
 		ControlSettings.size_scale = v
 		ControlSettings.changed.emit())
-	_slider(box, "Button opacity", 0.15, 1.0, ControlSettings.opacity, func(v: float) -> void:
+	_slider(box, "表示の濃さ", 0.15, 1.0, ControlSettings.opacity, func(v: float) -> void:
 		ControlSettings.opacity = v
 		ControlSettings.changed.emit())
-	_slider(box, "Distance from edge", 0.08, 0.3, ControlSettings.dpad_x, func(v: float) -> void:
+	_slider(box, "ボタンの横位置(ボタン式のみ)", 0.08, 0.3, ControlSettings.dpad_x, func(v: float) -> void:
 		ControlSettings.dpad_x = v
 		ControlSettings.changed.emit())
-	_slider(box, "Height", 0.5, 0.9, ControlSettings.pad_y, func(v: float) -> void:
+	_slider(box, "表示の高さ", 0.5, 0.9, ControlSettings.pad_y, func(v: float) -> void:
 		ControlSettings.pad_y = v
 		ControlSettings.changed.emit())
-	_slider(box, "Zoom (tiles on screen, original=12)", 7.0, 12.0, ControlSettings.view_tiles, func(v: float) -> void:
+	_slider(box, "カメラの寄り(画面の縦のマス数。原作は12)", 7.0, 12.0, ControlSettings.view_tiles, func(v: float) -> void:
 		ControlSettings.view_tiles = v)
 	var vib := CheckButton.new()
-	vib.text = "Vibration"
+	vib.text = "振動"
+	vib.add_theme_font_size_override("font_size", 24)
 	vib.button_pressed = ControlSettings.vibration
 	vib.toggled.connect(func(on: bool) -> void: ControlSettings.vibration = on)
 	box.add_child(vib)
 
-	_title(box, "MOVEMENT (tiles / seconds)")
+	_title(box, "動きの数値")
 	for key in ControlSettings.TUNABLE:
 		var r: Array = ControlSettings.TUNABLE[key]
-		_slider(box, key, r[0], r[1], Tuning.get_value(key), func(v: float) -> void: Tuning.set_value(key, v))
-	var reset := Button.new()
-	reset.text = "Reset movement to default"
-	reset.pressed.connect(func() -> void:
+		_slider(box, ControlSettings.LABELS.get(key, key), r[0], r[1], Tuning.get_value(key),
+			func(v: float) -> void: Tuning.set_value(key, v))
+	_button(box, "動きの数値を最初に戻す", func() -> void:
 		ControlSettings.reset_tuning()
-		_panel.queue_free()
-		_build()
-		_layout()
-		_panel.visible = true)
-	box.add_child(reset)
-	var close := Button.new()
-	close.text = "Close"
-	close.pressed.connect(_toggle)
-	box.add_child(close)
+		_rebuild())
+	_msg.text = "※操作方式の変更は、次にアプリを起動したときに反映されます"
+
+
+func _button(parent: Control, text: String, on_press: Callable) -> void:
+	var b := Button.new()
+	b.text = " %s " % text
+	b.add_theme_font_size_override("font_size", 24)
+	b.pressed.connect(on_press)
+	parent.add_child(b)
 
 
 func _title(box: VBoxContainer, text: String) -> void:
 	var l := Label.new()
 	l.text = text
-	l.add_theme_font_size_override("font_size", 28)
+	l.add_theme_font_size_override("font_size", 30)
 	box.add_child(l)
 
 
 func _slider(box: VBoxContainer, label: String, lo: float, hi: float, value: float, on_change: Callable) -> void:
 	var row := HBoxContainer.new()
 	var l := Label.new()
-	l.custom_minimum_size = Vector2(320, 0)
+	l.custom_minimum_size = Vector2(460, 0)
 	l.add_theme_font_size_override("font_size", 22)
 	row.add_child(l)
 	var s := HSlider.new()

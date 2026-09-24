@@ -9,7 +9,12 @@ extends Node3D
 ##   --seed=N          乱数の種(再現用)
 
 const VIEW_TILES_Y_ORIGINAL := 12.0   ## 原作の画面は縦12マス【動画】
-const GROUND_MARGIN := 3.0      ## 足場を画面下から何マス上に見せるか(タッチボタンと重ならないように)
+const GROUND_MARGIN := 3.0      ## 足場を画面下から何マス上に見せるか(タッチ操作の親指と重ならないように)
+const CAM_TAU_X := 0.08         ## 横の追従の速さ(秒。小さいほど速い)
+const CAM_TAU_Y := 0.18         ## 縦の追従の速さ
+const CAM_TAU_FALL := 0.05      ## 落下中・画面端に近いときの縦の追従
+const CAM_BAND_LO := 2.0        ## 足元が画面下からこのマス数より下に来たら追う
+const CAM_BAND_HI := 2.0        ## 頭が画面上からこのマス数より上に来たら追う
 const FOV := 30.0
 const ROUND_END_WAIT := 3.0
 const MATCH_END_WAIT := 5.0
@@ -24,7 +29,10 @@ var camera: Camera3D
 var hud: Hud
 
 var _big_star: Node3D
-var _cam_floor_y := -1.0
+var _cam_x := 0.0
+var _cam_y := 0.0
+var _look := 0.0
+var _cam_ready := false
 var _drops := {}                ## drop_id -> DroppedStar
 var _items: Array[Node3D] = []
 var _wait := 0.0
@@ -70,6 +78,11 @@ func _ready() -> void:
 		players.append(p)
 	if _args.has("demo-moves"):
 		players[0].input_source = _demo_moves_input
+	if _args.has("soak"):
+		for i in 2:
+			var src := _RandomInput.new(_rng.randi())
+			_soak_inputs.append(src)   # Callable だけでは参照が保たれないので持っておく
+			players[i].input_source = src.next
 	for i in 2:
 		if _args.has("demo-moves") and i == 0:
 			continue
@@ -89,9 +102,26 @@ func _ready() -> void:
 	hud = Hud.new()
 	add_child(hud)
 	if not _args.has("cpu-both") and not _args.has("sim"):
-		add_child(TouchControls.new())
-		add_child(SettingsPanel.new())
+		if ControlSettings.control_mode == "buttons":
+			add_child(TouchControls.new())
+		else:
+			add_child(StickControls.new())
+		var panel := SettingsPanel.new()
+		panel.report_source = _report
+		add_child(panel)
+	# 撮影・タッチ再現は一時停止中(設定パネルを開いている間)も動かす
+	var cap := _Capturer.new()
+	cap.game = self
+	cap.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(cap)
 	_start_round()
+
+
+class _Capturer extends Node:
+	var game: Node
+
+	func _process(_dt: float) -> void:
+		game._capture()
 
 
 func _start_round() -> void:
@@ -116,6 +146,7 @@ func _start_round() -> void:
 			it.queue_free()
 	_items.clear()
 	_big_star.visible = false
+	_cam_ready = false   # ラウンド開始時はカメラを追いかけさせず、その場に切り替える
 	hud.show_banner("")
 	_wait = 0.0
 
@@ -156,28 +187,69 @@ func _physics_process(dt: float) -> void:
 		_end_round()
 	if _args.has("sim"):
 		_sim_check(dt)
+	if _args.has("soak"):
+		_soak_check()
 
 
-func _process(_dt: float) -> void:
-	var dist := (ControlSettings.view_tiles * 0.5) / tan(deg_to_rad(FOV * 0.5))
-	var p := players[0]
-	# 縦のカメラ: 原作と同じく、普通のジャンプでは動かさない。
-	# 最後に立った足場を画面下から GROUND_MARGIN マスの位置に置き、画面上端に近づいたときだけ上げる
-	if p.is_on_floor() or _cam_floor_y < 0.0:
-		_cam_floor_y = p.position.y
-	var cy := _cam_floor_y + ControlSettings.view_tiles * 0.5 - GROUND_MARGIN
-	cy = maxf(cy, p.position.y + p.height() + 1.5 - ControlSettings.view_tiles * 0.5)   # 頭が上端に近づいたら追う
-	cy = clampf(cy, ControlSettings.view_tiles * 0.5 - GROUND_MARGIN, stage.height - ControlSettings.view_tiles * 0.5 + 1.0)
-	cy = lerpf(camera.position.y if camera.position.y != 0.0 else cy, cy, 0.1)
-	var cx := p.position.x
-	if absf(cx - camera.position.x) > stage.width * 0.5:
-		camera.position.x = cx   # ループで反対側へ移ったら一緒に飛ぶ
-	cx += p.moves.facing * 1.5   # 進行方向を少し先まで見せる
-	camera.position = Vector3(lerpf(camera.position.x, cx, 0.12), cy, dist)
-	_big_star.rotate_y(_dt * 2.0)
-	var star_x := _big_star.position.x if _big_star.visible else -1.0
+func _process(dt: float) -> void:
+	_update_camera(dt)
+	_wrap_all()
+	_big_star.rotate_y(dt * 2.0)
+	var star_x := stage.wrap_x(_big_star.position.x) if _big_star.visible else -1.0
 	hud.update(rules, [players[0].position.x, players[1].position.x], star_x, stage.width)
-	_capture()
+
+
+## カメラ。横は途切れずに進み続け(ループの継ぎ目でも飛ばない)、縦は「帯」の中にいる間は動かさない。
+## なめらかさは時間基準(フレームの速さに左右されない)。
+func _update_camera(dt: float) -> void:
+	var view := ControlSettings.view_tiles
+	var dist := (view * 0.5) / tan(deg_to_rad(FOV * 0.5))
+	var p := players[0]
+	if not _cam_ready:
+		_cam_x = p.position.x
+		_cam_y = p.position.y + view * 0.5 - GROUND_MARGIN
+		_cam_ready = true
+
+	# 横: 先読み(進行方向を少し先まで見せる。速いほど先まで)
+	var speed := clampf(absf(p.velocity.x) / Tuning.RUN_SPEED, 0.0, 1.0)
+	_look = move_toward(_look, p.moves.facing * (1.0 + 1.5 * speed), dt * 6.0)
+	var target_x := _cam_x + stage.delta_x(_cam_x, p.position.x) + _look
+	_cam_x = lerpf(_cam_x, target_x, 1.0 - exp(-dt / CAM_TAU_X))
+
+	# 縦: 足元が「画面下から CAM_BAND_LO マス」〜「画面上から CAM_BAND_HI マス」の帯にいる間は動かない
+	var bottom := _cam_y - view * 0.5
+	var feet := p.position.y
+	var head := feet + p.height()
+	var target_y := _cam_y
+	var tau := CAM_TAU_Y
+	if p.is_on_floor():
+		# 立っている足場を画面下から GROUND_MARGIN マスに戻す(高い足場に乗ったら上げる・下りたら下げる)
+		target_y = feet + view * 0.5 - GROUND_MARGIN
+	if feet - bottom < CAM_BAND_LO:
+		target_y = feet - CAM_BAND_LO + view * 0.5
+		if p.velocity.y < 0.0:
+			tau = CAM_TAU_FALL   # 落下中は素早く追う
+	elif (bottom + view) - head < CAM_BAND_HI:
+		target_y = head + CAM_BAND_HI - view * 0.5
+		tau = CAM_TAU_FALL
+	target_y = clampf(target_y, view * 0.5 - GROUND_MARGIN, stage.height - view * 0.5 + 1.0)
+	_cam_y = lerpf(_cam_y, target_y, 1.0 - exp(-dt / tau))
+	camera.position = Vector3(_cam_x, _cam_y, dist)
+
+
+## 左右ループの見た目: 全員をカメラに一番近い周回位置に表示する
+func _wrap_all() -> void:
+	stage.wrap_visuals(_cam_x)
+	for p in players:
+		p.set_view_shift(stage.image_x(p.position.x, _cam_x) - p.position.x)
+	for id in _drops:
+		var d: Pickups.DroppedStar = _drops[id]
+		d.set_view_shift(stage.image_x(d.position.x, _cam_x) - d.position.x)
+	for it in _items:
+		if is_instance_valid(it):
+			(it as Pickups.GrowItem).set_view_shift(stage.image_x(it.position.x, _cam_x) - it.position.x)
+	if _big_star.visible:
+		_big_star.position.x = stage.image_x(_big_star.position.x, _cam_x)
 
 
 # ---- 当たり判定 ---------------------------------------------------------
@@ -387,6 +459,85 @@ func cpu_target(i: int) -> Vector3:
 
 # ---- 開発用 -------------------------------------------------------------
 
+## --soak=秒: 2人を乱数で操作して長時間回し、毎フレーム異常がないか確かめる(キャラが消える不具合の調査用)
+class _RandomInput extends RefCounted:
+	var rng := RandomNumberGenerator.new()
+	var cur := PlayerInput.new()
+	var left := 0
+
+	func _init(seed_value: int) -> void:
+		rng.seed = seed_value
+
+	func next() -> PlayerInput:
+		left -= 1
+		var was_jump := cur.jump_held
+		var was_down := cur.down
+		if left <= 0:
+			left = rng.randi_range(5, 60)
+			cur = PlayerInput.make([-1.0, 0.0, 1.0][rng.randi_range(0, 2)], rng.randf() < 0.6,
+				false, rng.randf() < 0.5, rng.randf() < 0.12)
+		var out := PlayerInput.make(cur.move_x, cur.run, cur.jump_held and not was_jump, cur.jump_held,
+			cur.down, cur.down and not was_down)
+		return out
+
+
+var _soak_inputs: Array = []
+var _soak_errors := 0
+var _soak_frames := 0
+var _soak_wraps := 0
+var _soak_prev_x := [0.0, 0.0]
+
+
+func _soak_check() -> void:
+	_soak_frames += 1
+	var view := ControlSettings.view_tiles
+	for i in 2:
+		var p := players[i]
+		var bad := ""
+		if not (is_finite(p.position.x) and is_finite(p.position.y) and is_finite(p.velocity.x) and is_finite(p.velocity.y)):
+			bad = "位置か速度が数値として壊れた"
+		elif p.position.x < 0.0 or p.position.x >= stage.width or p.position.y > stage.height + 8.0:
+			bad = "ステージの外"
+		elif not p.dead and not p.visible:
+			bad = "生きているのに見えない"
+		elif not p.dead and rules.invuln[i] <= 0.0 and not p._model.visible:
+			bad = "無敵でないのにモデルが非表示"
+		elif i == 0 and not p.dead and _time > 1.0 and _wait <= 0.0:
+			var feet_on_screen := p.position.y - (_cam_y - view * 0.5)
+			if p.position.y > -1.0 and (feet_on_screen < -0.5 or feet_on_screen > view + 0.5):
+				bad = "カメラの画面外 (足元が画面下から%.1fマス)" % feet_on_screen
+		if bad != "":
+			_soak_errors += 1
+			if _soak_errors <= 20:
+				print("SOAK NG t=%.2f %dP %s pos=(%.2f, %.2f) vel=(%.2f, %.2f) state=%d" % [
+					_time, i + 1, bad, p.position.x, p.position.y, p.velocity.x, p.velocity.y, p.moves.state])
+		if absf(p.position.x - _soak_prev_x[i]) > stage.width * 0.5:
+			_soak_wraps += 1
+			if i == 0 and _args.has("verbose"):
+				print("WRAP 1P frame=%d" % Engine.get_process_frames())
+		_soak_prev_x[i] = p.position.x
+	if _time >= float(_args.get("soak", "60")):
+		print("SOAK RESULT: %.0fs %d frames, wraps=%d, errors=%d" % [_time, _soak_frames, _soak_wraps, _soak_errors])
+		get_tree().quit(1 if _soak_errors > 0 else 0)
+
+
+## 不具合報告の中身(設定パネルの「不具合報告をコピー」)
+func _report() -> String:
+	var lines := []
+	lines.append("renderer=%s gpu=%s / %s os=%s model=%s" % [
+		RenderingServer.get_current_rendering_method(), RenderingServer.get_video_adapter_name(),
+		RenderingServer.get_video_adapter_vendor(), OS.get_name(), OS.get_model_name()])
+	lines.append("fps=%d time=%.1f cam=(%.2f, %.2f)" % [Engine.get_frames_per_second(), _time, _cam_x, _cam_y])
+	for i in 2:
+		var p := players[i]
+		lines.append("P%d pos=(%.2f, %.2f) vel=(%.2f, %.2f) state=%d big=%s dead=%s visible=%s floor=%s stars=%d lives=%d" % [
+			i + 1, p.position.x, p.position.y, p.velocity.x, p.velocity.y, p.moves.state, str(p.big), str(p.dead),
+			str(p.visible), str(p.is_on_floor()), rules.stars[i], rules.lives[i]])
+	for e in stage.enemies:
+		lines.append("enemy pos=(%.2f, %.2f) alive=%s" % [e.position.x, e.position.y, str(e.is_alive())])
+	return "\n".join(lines)
+
+
 var _demo := {"phase": 0, "jumps": 0, "was_floor": true, "t": 0}
 
 ## --demo-moves: 右へダッシュ → 3段ジャンプ → 壁すべり → 壁キック → ヒップドロップ を自動で行う
@@ -438,7 +589,39 @@ func _demo_moves_input() -> PlayerInput:
 	return PlayerInput.make(0, false, false, false)
 
 
+## --touch-demo: 画面へのタッチを自動で再現する(左スティックを右へ大きく倒してダッシュ、右側を押してジャンプ)
+func _touch_demo() -> void:
+	var f := Engine.get_process_frames()
+	var vs := get_viewport().get_visible_rect().size
+	var base := Vector2(vs.x * 0.16, vs.y * 0.8)
+	if f == 20:
+		_touch(0, base, true)
+	if f > 20 and f < 400:
+		var drag := InputEventScreenDrag.new()
+		drag.index = 0
+		drag.position = base + Vector2(minf((f - 20) * 6.0, 90.0), 0)
+		Input.parse_input_event(drag)
+	if f % 70 == 50:
+		_touch(1, Vector2(vs.x * 0.82, vs.y * 0.75), true)
+	if f % 70 == 68:
+		_touch(1, Vector2(vs.x * 0.82, vs.y * 0.75), false)
+	if f == 60 and _args.has("open-settings"):
+		for c in get_children():
+			if c is SettingsPanel:
+				(c as SettingsPanel)._toggle()
+
+
+func _touch(index: int, pos: Vector2, pressed: bool) -> void:
+	var t := InputEventScreenTouch.new()
+	t.index = index
+	t.position = pos
+	t.pressed = pressed
+	Input.parse_input_event(t)
+
+
 func _capture() -> void:
+	if _args.has("touch-demo"):
+		_touch_demo()
 	if not _args.has("capture"):
 		return
 	_frame += 1

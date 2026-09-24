@@ -13,18 +13,18 @@ static var SKID_DECEL := 35.0         ## 切り返し中の減速(ダッシュ�
 static var AIR_ACCEL_RATE := 0.85     ## 空中の加速は地上の何倍か【推測・調整】
 
 # ジャンプ
-static var GRAVITY_UP := 27.8         ## 上昇0.6秒・高さ5マスから計算
-static var GRAVITY_DOWN := 49.0       ## 落下0.45秒から計算
+static var GRAVITY_UP := 36.0         ## 動画実測(地面基準): 高さ4.5マスを0.5秒で上昇
+static var GRAVITY_DOWN := 42.0       ## 動画実測(地面基準): 6.8マスを0.57秒で落下
 static var GRAVITY_CUT := 80.0        ## 上昇中にボタンを離したとき(低いジャンプ)【決定・調整】
-static var MAX_FALL := 24.0           ## 5マスを0.45秒で落ちると終速約22マス/秒【決定・調整】
-static var RUN_JUMP_HEIGHT := 5.0     ## 動画実測(±1マス)
-static var STAND_JUMP_HEIGHT := 4.0   ## 【決定・調整】
+static var MAX_FALL := 24.0           ## 6.8マスの落下(0.57秒)で頭打ちにならない値【決定・調整】
+static var RUN_JUMP_HEIGHT := 4.5     ## 動画実測(地面基準、9.7秒のジャンプ)
+static var STAND_JUMP_HEIGHT := 3.6   ## 【推測・調整】助走ジャンプの8割
 
 # 3段ジャンプ(原作に存在【Wiki】。数値は【推測・調整】)
 static var TRIPLE_WINDOW := 0.12      ## 着地からこの秒数以内に跳ぶと次の段になる
 static var TRIPLE_MIN_SPEED := 4.5    ## この横速度以上で走っていること
-static var JUMP2_HEIGHT := 6.0        ## 2段目
-static var JUMP3_HEIGHT := 7.0        ## 3段目(宙返り)
+static var JUMP2_HEIGHT := 5.3        ## 2段目(動画実測: 16秒の着地直後のジャンプ)
+static var JUMP3_HEIGHT := 6.2        ## 3段目(宙返り)【推測・調整】動画に映っていない
 
 # 壁すべり・壁キック(原作に存在【Wiki】。入力制限16フレームは【TAS】、他は【推測・調整】)
 static var WALL_SLIDE_SPEED := 3.0    ## 壁に張り付いて滑り落ちる速さ
@@ -74,6 +74,12 @@ static func get_value(key: String) -> float:
 			return SKID_DECEL
 		"GP_HOVER":
 			return GP_HOVER
+		"GRAVITY_UP":
+			return GRAVITY_UP
+		"GRAVITY_DOWN":
+			return GRAVITY_DOWN
+		"WALK_SPEED":
+			return WALK_SPEED
 	return 0.0
 
 
@@ -102,3 +108,9 @@ static func set_value(key: String, v: float) -> void:
 			SKID_DECEL = v
 		"GP_HOVER":
 			GP_HOVER = v
+		"GRAVITY_UP":
+			GRAVITY_UP = v
+		"GRAVITY_DOWN":
+			GRAVITY_DOWN = v
+		"WALK_SPEED":
+			WALK_SPEED = v

@@ -35,6 +35,9 @@ class DroppedStar extends CharacterBody3D:
 		position.x = stage.wrap_x(position.x)
 		_model.rotate_y(delta * 4.0)
 
+	func set_view_shift(dx: float) -> void:
+		_model.position.x = dx
+
 	## age: 落ちてからの秒数。最後の1.5秒は点滅【決定・調整】
 	func show_age(age: float) -> void:
 		var left := MatchRules.DROP_LIFETIME - age
@@ -63,6 +66,10 @@ class GrowItem extends CharacterBody3D:
 		add_child(shape)
 		_model = Assets.spawn(Assets.GROW_ITEM, 0.8)
 		add_child(_model)
+
+	func set_view_shift(dx: float) -> void:
+		if _model:
+			_model.position.x = dx
 
 	func _physics_process(delta: float) -> void:
 		_model.rotate_y(delta * 2.5)

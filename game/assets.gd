@@ -42,6 +42,19 @@ static func spawn(path: String, height: float) -> Node3D:
 	return holder
 
 
+## 骨を持たない置物用: 幅と高さを別々に合わせる(土管など)
+static func spawn_box(path: String, width: float, height: float) -> Node3D:
+	var holder := spawn(path, height)
+	var inner: Node3D = holder.get_child(0)
+	var b := bounds(inner)
+	var sx := width / maxf(b.size.x, 0.001)
+	inner.scale.x *= sx
+	inner.scale.z *= sx
+	inner.position.x *= sx
+	inner.position.z *= sx
+	return holder
+
+
 static func bounds(node: Node3D) -> AABB:
 	var box := AABB()
 	var first := true

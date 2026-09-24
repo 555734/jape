@@ -17,8 +17,8 @@ const MAP := [
 	"                                                ",
 	"                                                ",
 	"        B?BB            1           BB?B        ",
-	"  P                ooo CC ooo                P  ",
-	"  P  S            E   CCCC   E     E      T  P  ",
+	"  PP               ooo CC ooo               PP  ",
+	"  PP S            E   CCCC   E     E      T PP  ",
 	"###################  ######  ###################",
 ]
 ## 動き確認用の練習ステージ(平らな地面と、壁キック用の高い壁)
@@ -34,12 +34,11 @@ const PRACTICE := [
 	"                                                4                 CC            ",
 	"                                                                  CC            ",
 	"            1                                               5     CC            ",
-	"  P                                                               CC         P  ",
-	"  P  S                                                            CC      T  P  ",
+	"  PP                                                              CC        PP  ",
+	"  PP S                                                            CC      T PP  ",
 	"################################################################################",
 ]
 const SOLID := "#B?CP"
-const WRAP_COPY := 14   ## ループの継ぎ目が見えるよう、端から何列を反対側にも複製するか
 
 signal coin_taken(coin: Node3D)
 
@@ -54,6 +53,8 @@ var pipe_tops: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
 var ledges: Array[Vector3] = []
 
 var coins: Array[Node3D] = []
+var _wrap_nodes: Array[Node3D] = []
+var _dirt: MeshInstance3D
 var enemies: Array[Walker] = []
 var _used_blocks := {}
 var _block_nodes := {}
@@ -80,16 +81,16 @@ func _ready() -> void:
 			if SOLID.contains(c) and c != "P" and not SOLID.contains(tile(x, y + 1)):
 				ledges.append(Vector3(x + 0.5, y + 1, 0))
 	pipe_x.sort()
+	var groups := _pipe_groups(pipe_x)
 	for i in 2:
-		var px := pipe_x[i]
+		var g: Array = groups[i]
 		var top := 0
-		while tile(px, top) == "P" or tile(px, top) == "#":
+		while tile(g[0], top) == "P" or tile(g[0], top) == "#":
 			top += 1
-		pipe_tops[i] = Vector3(px + 0.5, top, 0)
+		pipe_tops[i] = Vector3((g[0] + g[g.size() - 1] + 1) * 0.5, top, 0)
 
-	for offset in [-width, 0, width]:
-		_build_terrain(offset)
-	_build_colliders()
+	_build_terrain(0)   # 見た目は1周分だけ。毎フレーム wrap_visuals() でカメラの近くへ置き直す
+	_build_colliders()  # 当たり判定は3周分並べる
 	_build_background()
 	reset()
 
@@ -144,6 +145,7 @@ func reset() -> void:
 				"o":
 					var c := Assets.spawn(Assets.COIN, 0.7)
 					c.position = Vector3(x + 0.5, y + 0.15, 0)
+					c.set_meta("lx", c.position.x)
 					add_child(c)
 					coins.append(c)
 				"E":
@@ -175,10 +177,6 @@ func _build_terrain(offset: int) -> void:
 	var pipes := {}
 	for y in height:
 		for x in width:
-			if offset < 0 and x < width - WRAP_COPY:
-				continue
-			if offset > 0 and x >= WRAP_COPY:
-				continue
 			var pos := Vector3(x + offset + 0.5, y, 0)
 			match tile(x, y):
 				"#":
@@ -199,11 +197,18 @@ func _build_terrain(offset: int) -> void:
 				"P":
 					if not pipes.has(x):
 						pipes[x] = y
-	for x in pipes:
+	var xs: Array = pipes.keys()
+	xs.sort()
+	for g in _pipe_groups(xs):
+		var x0: int = g[0]
 		var h := 0
-		while tile(x, pipes[x] + h) == "P":
+		while tile(x0, pipes[x0] + h) == "P":
 			h += 1
-		_deco(Assets.PIPE, Vector3(x + offset + 0.5, pipes[x], 0), float(h))
+		var w := float(g.size())   # 原作の土管は幅2マス【動画】。地図でも2列にしている
+		var pipe := Assets.spawn_box(Assets.PIPE, w, float(h))
+		pipe.position = Vector3(x0 + offset + w * 0.5, pipes[x0], 0)
+		add_child(pipe)
+		_register(pipe)
 	# 地面の下の土(見た目だけの大きな箱)
 	var dirt := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -212,8 +217,21 @@ func _build_terrain(offset: int) -> void:
 	mat.albedo_color = Color(0.72, 0.45, 0.3)
 	bm.material = mat
 	dirt.mesh = bm
-	dirt.position = Vector3(offset + width * 0.5, -4.0, -0.2)
+	bm.size = Vector3(80, 6, 3)   # 画面より広い。カメラに合わせて横に動かす
+	dirt.position = Vector3(0, -4.0, -0.2)
 	add_child(dirt)
+	_dirt = dirt
+
+
+## 隣り合う列の土管を1本にまとめる
+func _pipe_groups(xs: Array) -> Array:
+	var groups := []
+	for x in xs:
+		if not groups.is_empty() and groups[-1][-1] == x - 1:
+			groups[-1].append(x)
+		else:
+			groups.append([x])
+	return groups
 
 
 ## 当たり判定: 横に連続するブロックを1つの箱にまとめる(継ぎ目で引っかからないように)
@@ -250,4 +268,29 @@ func _deco(path: String, pos: Vector3, h: float) -> Node3D:
 	var n := Assets.spawn(path, h)
 	n.position = pos
 	add_child(n)
+	_register(n)
 	return n
+
+
+## ループ表示の対象にする(本来の横位置を覚えておく)
+func _register(n: Node3D) -> void:
+	n.set_meta("lx", n.position.x)
+	_wrap_nodes.append(n)
+
+
+## 本来の横位置 lx の物を、カメラ(cam_x)に一番近い周回位置に置いたときの x
+func image_x(lx: float, cam_x: float) -> float:
+	return lx + roundf((cam_x - lx) / width) * width
+
+
+## 左右ループの見た目: すべての部品をカメラに一番近い周回位置へ置き直す。
+## 画面の幅(約18〜22マス)はステージ(48マス)より狭いので、同じ物が2つ見えることはない。
+func wrap_visuals(cam_x: float) -> void:
+	for n in _wrap_nodes:
+		n.position.x = image_x(n.get_meta("lx"), cam_x)
+	for c in coins:
+		c.position.x = image_x(c.get_meta("lx"), cam_x)
+	for e in enemies:
+		e.set_view_shift(image_x(e.position.x, cam_x) - e.position.x)
+	if _dirt:
+		_dirt.position.x = cam_x

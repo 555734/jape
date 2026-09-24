@@ -7,6 +7,8 @@ extends CharacterBody3D
 const BIG_HEIGHT := 1.8     ## docs/RULES.md §2
 const SMALL_HEIGHT := 0.9
 const WIDTH := 0.8
+const SMALL_VISUAL := 1.15  ## 見た目の高さ(原作動画で頭のてっぺんが地面から約1.2マス)
+const BIG_VISUAL := 2.0     ## 見た目の高さ(原作の大きい状態は約2マス)
 const RESPAWN_TIME := 1.5   ## ミスしてから土管から出てくるまで【決定・調整】
 
 signal bumped_block(x: int, y: int)
@@ -129,6 +131,12 @@ func _physics_process(delta: float) -> void:
 	_update_visual(delta)
 
 
+## 左右ループの見た目用: 本体(当たり判定)は動かさず、見た目と砂ぼこりだけ横にずらす
+func set_view_shift(dx: float) -> void:
+	_model.position.x = dx
+	_dust.position.x = dx
+
+
 ## 相手や敵を踏んだとき跳ね返る。ジャンプを押していれば高く
 func bounce() -> void:
 	moves.vel = Vector2(velocity.x, velocity.y)
@@ -209,21 +217,25 @@ func _update_visual(delta: float) -> void:
 		_model.position.y = 0.0
 		_body.position.y = 0.0
 
-	# 着地の潰れ
-	var base := 1.0 if big else 0.5
-	var sy := 1.0
+	# 大きさ: 原作の比率に合わせた見た目の高さ(当たり判定とは別)。
+	# 骨で動くモデルは縦横で違う拡大縮小をすると一部のスマホGPUで壊れるため、必ず縦横同じ倍率にする。
+	# 着地・しゃがみの「潰れ」は、倍率ではなく少し沈める・小さくすることで表す。
+	var visual := BIG_VISUAL if big else SMALL_VISUAL
+	var k := visual / BIG_HEIGHT
+	var dip := 0.0
 	if _squash > 0.0:
 		_squash -= delta
-		sy = 0.75
+		dip = -0.08 * visual
 	if st == PlayerMoves.State.CROUCH:
-		sy = 0.6
-	var thick := base * 1.2   # 細い手足でも小さい画面で読み取れるよう、横と奥行きを少し太くする
-	_model.scale = Vector3(thick * (2.0 - sy) if sy < 1.0 else thick, base * sy, thick)
+		k *= 0.7
+	_model.scale = Vector3.ONE * k
+	if not moves.flipping and st != PlayerMoves.State.GROUND_POUND:
+		_model.position.y = dip
 
 	# 砂ぼこり: ダッシュ・切り返し・壁すべり
 	var fast := is_on_floor() and absf(velocity.x) > Tuning.WALK_SPEED + 1.0
 	_dust.emitting = fast or st == PlayerMoves.State.SKID or st == PlayerMoves.State.WALL_SLIDE
-	_dust.position = Vector3(0.0, 0.05 if st != PlayerMoves.State.WALL_SLIDE else height() * 0.6, 0.0)
+	_dust.position.y = 0.05 if st != PlayerMoves.State.WALL_SLIDE else height() * 0.6
 
 	_model.visible = invuln <= 0.0 or int(invuln * 15.0) % 2 == 0
 	_play_anim(st)

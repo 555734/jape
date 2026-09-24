@@ -55,12 +55,17 @@ func _physics_process(delta: float) -> void:
 		visible = false
 
 
+## 左右ループの見た目用: 本体(当たり判定)は動かさず、見た目だけ横にずらす
+func set_view_shift(dx: float) -> void:
+	_model.position.x = dx
+
+
 ## 踏まれた
 func squash() -> void:
 	dead = true
 	_dead_timer = 0.4
 	collision_layer = 0
-	_model.scale.y = 0.3
+	_model.scale = Vector3.ONE * 0.6   # 縦横同じ倍率で縮める(骨で動くモデルを平たく潰すと一部のGPUで壊れるため)
 
 
 func is_alive() -> bool:

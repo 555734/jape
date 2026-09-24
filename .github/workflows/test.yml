@@ -26,3 +26,5 @@ jobs:
             godot --headless --path . --fixed-fps 60 --disable-vsync -- --sim --seed=$seed | grep -E "ROUND|SIM|STUCK|TIMEOUT"
             test ${PIPESTATUS[0]} -eq 0
           done
+      - name: 乱数操作の耐久テスト(10分ぶん。位置が壊れない・消えない・画面外に出ない)
+        run: godot --headless --path . --fixed-fps 60 --disable-vsync -- --soak=600 --seed=7 | grep -E "SOAK"; test ${PIPESTATUS[0]} -eq 0

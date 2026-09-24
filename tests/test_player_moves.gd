@@ -71,21 +71,22 @@ func test_running_jump_height_and_timing() -> void:
 		_frame(PlayerInput.make(1, true, false, true))
 		up += 1
 	var down := _until_land(PlayerInput.make(1, true, false, true))
-	assert_near(peak, 5.0, 0.25, "助走ジャンプの高さ (マス)")
-	assert_near(up * DT, 0.6, 0.03, "上昇時間 (秒)")
-	assert_near(down * DT, 0.45, 0.0225, "落下時間 (秒)")
+	assert_near(peak, 4.5, 0.225, "助走ジャンプの高さ (マス)")
+	assert_near(up * DT, 0.5, 0.025, "上昇時間 (秒)")
+	assert_near(down * DT, sqrt(2.0 * 4.5 / 42.0), 0.025, "落下時間 (秒)")
 
 
 func test_standing_and_short_jump() -> void:
 	_fresh()
 	_frame(PlayerInput.make(0, false, true, true))
 	_until_land(PlayerInput.make(0, false, false, true))
-	assert_near(peak, 4.0, 0.2, "立ちジャンプの高さ (マス)")
+	assert_near(peak, 3.6, 0.18, "立ちジャンプの高さ (マス)")
 	_fresh()
 	_frame(PlayerInput.make(0, false, true, true))
 	_hold(PlayerInput.make(0, false, false, true), 2)
 	_until_land(PlayerInput.make(0, false, false, false))
-	assert_true(peak < 2.0, "すぐ離すと低く跳ぶ (高さ %.2f < 2マス)" % peak)
+	# 動画(4秒付近)の短いジャンプは約2.5マス。通常ジャンプの6割未満になること
+	assert_true(peak < Tuning.RUN_JUMP_HEIGHT * 0.6, "すぐ離すと低く跳ぶ (高さ %.2f < %.2fマス)" % [peak, Tuning.RUN_JUMP_HEIGHT * 0.6])
 
 
 ## 3段ジャンプ: 着地直後に跳ぶたびに高くなる
@@ -104,9 +105,9 @@ func test_triple_jump() -> void:
 	_fresh()
 	_run_in()
 	var h := _triple(2)
-	assert_near(h[0], 5.0, 0.25, "3段ジャンプ 1段目 (マス)")
-	assert_near(h[1], 6.0, 0.3, "3段ジャンプ 2段目 (マス)")
-	assert_near(h[2], 7.0, 0.35, "3段ジャンプ 3段目 (マス)")
+	assert_near(h[0], 4.5, 0.225, "3段ジャンプ 1段目 (マス)")
+	assert_near(h[1], 5.3, 0.265, "3段ジャンプ 2段目 (マス)")
+	assert_near(h[2], 6.2, 0.31, "3段ジャンプ 3段目 (マス)")
 	assert_true(m.jump_stage == 2, "3段目になっている")
 
 
