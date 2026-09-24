@@ -1,0 +1,22 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+env:
+  GODOT_VERSION: "4.5"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Godot を用意
+        run: |
+          curl -sSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+      - name: 素材の読み込み(import)
+        run: godot --headless --path . --import
+      - name: テスト
+        run: godot --headless --path . -s res://tests/run_tests.gd
