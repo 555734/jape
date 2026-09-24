@@ -6,4 +6,4 @@ Prompt: "Create a polished original cheerful meadow world background only, suita
 
 The blocks, soil, pipes, coins, star, growth pickup and walking enemy are original procedural meshes in `game/stage_art.gd`.
 
-The two player characters are original procedural humanoids in `actors/player/hero_avatar.gd`. Their proportions, face, colors and poses were checked both at gameplay scale and in the four-character preview at `tools/preview/hero_avatar_preview.gd`.
+The player characters are Blender-modeled Mario and Luigi recreations based on the supplied DS gameplay screenshots. Editable `.blend` sources are in `assets_src/characters/`; exported `.glb` files are in `assets/characters/`. The deterministic build script is `tools/blender/make_brothers.py`, and `actors/player/hero_avatar.gd` applies poses to the imported head and limb nodes. The models are independently made recreations, not extracted game files. The four-character preview is `tools/preview/hero_avatar_preview.gd`.
