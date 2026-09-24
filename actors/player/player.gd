@@ -21,9 +21,7 @@ var velocity: Vector3:
 		return sim.velocity
 
 var _model: Node3D          ## 向き・傾き・回転をかける入れ物
-var _body: Node3D           ## 素材のモデル本体
-var _ap: AnimationPlayer
-var _anims := {}
+var _body: HeroAvatar       ## オリジナルの人型モデル
 var _squash := 0.0
 var _spin := 0.0
 var _dust: CPUParticles3D
@@ -32,17 +30,8 @@ var _dust: CPUParticles3D
 func _ready() -> void:
 	_model = Node3D.new()
 	add_child(_model)
-	_body = Assets.spawn(Assets.CHARACTER, BIG_HEIGHT)
+	_body = HeroAvatar.new(index)
 	_model.add_child(_body)
-	Assets.paint_player(_body, index)
-	_ap = Assets.find_anim_player(_body)
-	if _ap:
-		for key in ["Idle", "Walk", "Run", "Jump", "RecieveHit", "Roll"]:
-			var n := Assets.anim_name(_ap, key)
-			if n != &"":
-				_anims[key] = n
-				if key in ["Idle", "Walk", "Run"]:
-					_ap.get_animation(n).loop_mode = Animation.LOOP_LINEAR
 	_dust = _make_dust()
 	add_child(_dust)
 
@@ -92,7 +81,8 @@ func _update_visual(delta: float) -> void:
 	var st := moves.state
 	var facing := moves.facing
 	_model.rotation = Vector3.ZERO
-	_body.rotation_degrees.y = 90.0 * facing
+	# 正面を少しカメラへ向け、走る方向と表情を同時に読める角度にする。
+	_body.rotation_degrees.y = 52.0 * facing
 
 	# 前傾(走るほど前に倒れる)・切り返しは後ろへ反る
 	var lean := 0.0
@@ -135,35 +125,7 @@ func _update_visual(delta: float) -> void:
 	_dust.position.y = 0.05 if st != PlayerMoves.State.WALL_SLIDE else height() * 0.6
 
 	_model.visible = invuln <= 0.0 or int(invuln * 15.0) % 2 == 0
-	_play_anim(st)
-
-
-func _play_anim(st: int) -> void:
-	if _ap == null:
-		return
-	var key := "Idle"
-	var speed := 1.0
-	match st:
-		PlayerMoves.State.GROUND_POUND, PlayerMoves.State.CROUCH, PlayerMoves.State.WALL_SLIDE:
-			key = "Jump"
-		PlayerMoves.State.GP_LAND:
-			key = "Idle"
-		PlayerMoves.State.SKID:
-			key = "Idle"
-		_:
-			var vx := absf(velocity.x)
-			if not is_on_floor():
-				key = "Jump"
-			elif vx > Tuning.WALK_SPEED + 0.5:
-				key = "Run"
-				speed = clampf(vx / Tuning.RUN_SPEED * 1.25, 0.9, 1.5)
-			elif vx > 0.2:
-				key = "Walk"
-				speed = clampf(vx / Tuning.WALK_SPEED * 1.2, 0.6, 1.5)
-	var n: StringName = _anims.get(key, &"")
-	if n != &"" and _ap.current_animation != n:
-		_ap.play(n, 0.08)
-	_ap.speed_scale = speed
+	_body.pose(st, is_on_floor(), velocity.x, delta)
 
 
 func _make_dust() -> CPUParticles3D:
