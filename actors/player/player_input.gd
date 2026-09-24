@@ -31,3 +31,30 @@ static func make(move_x: float, run: bool, jump_pressed: bool, jump_held: bool, 
 	i.down = down
 	i.down_pressed = down_pressed
 	return i
+
+
+## 通信と巻き戻しのため、横の入力を -127〜127 の整数に丸めた入力にする(ローカル対戦でも同じ経路を通す)
+func quantized() -> PlayerInput:
+	return PlayerInput.from_bits(to_bits())
+
+
+## 2バイトにまとめる: 下位8ビット=横の入力(符号付き)、上位=ボタン
+func to_bits() -> int:
+	var mx := clampi(roundi(move_x * 127.0), -127, 127) & 0xFF
+	var b := int(down) | int(down_pressed) << 1 | int(run) << 2 | int(jump_pressed) << 3 | int(jump_held) << 4
+	return mx | b << 8
+
+
+static func from_bits(bits: int) -> PlayerInput:
+	var i := PlayerInput.new()
+	var mx := bits & 0xFF
+	if mx >= 128:
+		mx -= 256
+	i.move_x = mx / 127.0
+	var b := bits >> 8
+	i.down = (b & 1) != 0
+	i.down_pressed = (b & 2) != 0
+	i.run = (b & 4) != 0
+	i.jump_pressed = (b & 8) != 0
+	i.jump_held = (b & 16) != 0
+	return i

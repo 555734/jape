@@ -45,6 +45,30 @@ func _init(seed_value := 0) -> void:
 		_rng.randomize()
 
 
+## 通信対戦の巻き戻し用: 状態をまるごと配列にする / 配列から戻す
+func snapshot() -> Array:
+	return [stars.duplicate(), lives.duplicate(), wins.duplicate(), coins.duplicate(), invuln.duplicate(),
+		star_active, star_point, star_timer, round_winner, match_winner,
+		drops.duplicate(true), new_drops.duplicate(true), _next_drop_id, _rng.state]
+
+
+func restore(a: Array) -> void:
+	stars = a[0].duplicate()
+	lives = a[1].duplicate()
+	wins = a[2].duplicate()
+	coins = a[3].duplicate()
+	invuln = a[4].duplicate()
+	star_active = a[5]
+	star_point = a[6]
+	star_timer = a[7]
+	round_winner = a[8]
+	match_winner = a[9]
+	drops.assign(a[10].duplicate(true))
+	new_drops.assign(a[11].duplicate(true))
+	_next_drop_id = a[12]
+	_rng.state = a[13]
+
+
 func start_round() -> void:
 	stars = [0, 0]
 	lives = [start_lives, start_lives]

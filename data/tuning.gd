@@ -47,7 +47,7 @@ static func velocity_for_height(h: float) -> float:
 
 static func jump_velocity(speed_x: float) -> float:
 	var t := clampf(absf(speed_x) / RUN_SPEED, 0.0, 1.0)
-	return velocity_for_height(lerpf(STAND_JUMP_HEIGHT, RUN_JUMP_HEIGHT, t))
+	return velocity_for_height(STAND_JUMP_HEIGHT + (RUN_JUMP_HEIGHT - STAND_JUMP_HEIGHT) * t)
 
 ## 調整パネル用: 名前で値を読む
 static func get_value(key: String) -> float:
