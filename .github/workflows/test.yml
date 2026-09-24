@@ -20,3 +20,9 @@ jobs:
         run: godot --headless --path . --import
       - name: テスト
         run: godot --headless --path . -s res://tests/run_tests.gd
+      - name: CPU同士の自動対戦(3試合、最後まで終わり詰まらないこと)
+        run: |
+          for seed in 1 2 3; do
+            godot --headless --path . --fixed-fps 60 --disable-vsync -- --sim --seed=$seed | grep -E "ROUND|SIM|STUCK|TIMEOUT"
+            test ${PIPESTATUS[0]} -eq 0
+          done

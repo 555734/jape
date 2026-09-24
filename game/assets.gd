@@ -14,6 +14,7 @@ const STAR := "Powerups and Pickups/glTF/Star.gltf"
 const ENEMY := "Enemies/glTF/Enemy.gltf"
 const CLOUD := "Nature/glTF/Cloud_2.gltf"
 const TREE := "Nature/glTF/Tree.gltf"
+const GROW_ITEM := "Powerups and Pickups/glTF/Heart.gltf"
 
 static var _cache := {}
 
