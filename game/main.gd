@@ -62,19 +62,32 @@ func _ready() -> void:
 	_setup_input()
 	_setup_environment()
 
-	map = StageMap.new(StageMap.PRACTICE if _args.has("practice") else StageMap.GRASSLAND)
-	sim = Simulation.new(_rng.randi(), map)
-	stage = Grassland.new()
-	stage.map = map
-	stage.sim = sim
-	add_child(stage)
+	camera = Camera3D.new()
+	camera.fov = FOV
+	add_child(camera)
+	camera.current = true
+	hud = Hud.new()
+	add_child(hud)
+	var online := _args.has("host") or _args.has("join")
+	if not _args.has("cpu-both") and not _args.has("sim"):
+		if ControlSettings.control_mode == "buttons":
+			add_child(TouchControls.new())
+		else:
+			add_child(StickControls.new())
+		if not online:   # 通信対戦中は一時停止も動きの数値の変更もできないので出さない
+			var panel := SettingsPanel.new()
+			panel.report_source = _report
+			add_child(panel)
+	# 撮影・タッチ再現は一時停止中(設定パネルを開いている間)も動かす
+	var cap := _Capturer.new()
+	cap.game = self
+	cap.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(cap)
 
-	for i in 2:
-		var p := Player.new()
-		p.index = i
-		p.sim = sim.players[i]
-		add_child(p)
-		players.append(p)
+	if online:
+		_setup_online()
+		return
+	_build_world(_rng.randi())
 	if _args.has("demo-moves"):
 		input_sources[0] = _demo_moves_input
 	if _args.has("soak"):
@@ -86,34 +99,33 @@ func _ready() -> void:
 		if _args.has("demo-moves") and i == 0:
 			continue
 		if i == 1 or _args.has("cpu-both") or _args.has("sim"):
-			brains[i] = CpuBrain.new(sim, i, _rng.randi())
-			var b: CpuBrain = brains[i]
-			input_sources[i] = func() -> PlayerInput: return b.think(Simulation.DT)
+			_attach_cpu(i)
+	_handle_events(sim.events)
 
+
+## 試合の中身(Simulation)と、それを映すステージ・キャラを作る
+func _build_world(match_seed: int) -> void:
+	map = StageMap.new(StageMap.PRACTICE if _args.has("practice") else StageMap.GRASSLAND)
+	sim = Simulation.new(match_seed, map)
+	stage = Grassland.new()
+	stage.map = map
+	stage.sim = sim
+	add_child(stage)
+	for i in 2:
+		var p := Player.new()
+		p.index = i
+		p.sim = sim.players[i]
+		add_child(p)
+		players.append(p)
 	_big_star = Assets.spawn(Assets.STAR, 1.2)
 	_big_star.visible = false
 	add_child(_big_star)
 
-	camera = Camera3D.new()
-	camera.fov = FOV
-	add_child(camera)
-	camera.current = true
-	hud = Hud.new()
-	add_child(hud)
-	if not _args.has("cpu-both") and not _args.has("sim"):
-		if ControlSettings.control_mode == "buttons":
-			add_child(TouchControls.new())
-		else:
-			add_child(StickControls.new())
-		var panel := SettingsPanel.new()
-		panel.report_source = _report
-		add_child(panel)
-	# 撮影・タッチ再現は一時停止中(設定パネルを開いている間)も動かす
-	var cap := _Capturer.new()
-	cap.game = self
-	cap.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(cap)
-	_handle_events()
+
+func _attach_cpu(i: int) -> void:
+	brains[i] = CpuBrain.new(sim, i, _rng.randi())
+	var b: CpuBrain = brains[i]
+	input_sources[i] = func() -> PlayerInput: return b.think(Simulation.DT)
 
 
 class _Capturer extends Node:
@@ -124,27 +136,111 @@ class _Capturer extends Node:
 
 
 func _physics_process(_dt: float) -> void:
+	if _net != null:
+		_online_tick()
+		return
 	_time += Simulation.DT
 	var inputs := []
 	for i in 2:
 		inputs.append((input_sources[i].call() as PlayerInput).quantized())
 	sim.step(inputs)
-	_handle_events()
+	_handle_events(sim.events)
 	if _args.has("sim"):
 		_sim_check(Simulation.DT)
 	if _args.has("soak"):
 		_soak_check()
 
 
+# ---- 通信対戦 -----------------------------------------------------------
+## 開発用の起動オプション:
+##   --host[=ポート]                 部屋を作って相手を待つ(1P になる)
+##   --join=アドレス[:ポート]        部屋に入る(2P になる)
+##   --net-lag=ms --net-jitter=ms --net-loss=0〜1   わざと回線を悪くする
+##   --cpu-both と組み合わせると自分側も CPU が操作する(2窓で自動対戦)
+
+const DISCONNECT_TICKS := 180   ## この間(3秒)何も届かなければ切断とみなす
+
+var _net: UdpTransport
+var _session: RollbackSession
+var _net_state := ""            ## "" / "waiting" / "playing" / "lost" / "desync"
+
+
+func _setup_online() -> void:
+	_net = UdpTransport.new()
+	var err: Error
+	if _args.has("host"):
+		var port := int(_args["host"]) if _args["host"] != "" else UdpTransport.DEFAULT_PORT
+		err = _net.host(port, _rng.randi() | 1, int(_args.get("net-delay", "2")))
+		print("NET host port=%d" % port)
+	else:
+		var parts: PackedStringArray = (_args["join"] as String).split(":")
+		var port := int(parts[1]) if parts.size() > 1 else UdpTransport.DEFAULT_PORT
+		err = _net.join(parts[0], port)
+		print("NET join %s:%d" % [parts[0], port])
+	if err != OK:
+		push_error("NET 接続を始められません: %s" % error_string(err))
+	_net_state = "waiting"
+
+
+func _online_tick() -> void:
+	_net.update()
+	if _session == null:
+		_net.poll()   # 接続の手続きだけ進める(試合前に届いた入力は、相手がまた送ってくる)
+		if _net.connected:
+			_start_online()
+		return
+	_time += Simulation.DT
+	var input: PlayerInput = input_sources[_session.local].call()
+	_session.tick(input)
+	_handle_events(_session.events)
+	if _session.desync_frame >= 0 and _net_state == "playing":
+		_net_state = "desync"
+		print("NET DESYNC at frame %d" % _session.desync_frame)
+	if _session.ticks_since_recv > DISCONNECT_TICKS and _net_state == "playing":
+		_net_state = "lost"
+		print("NET LOST")
+		if _args.has("sim"):
+			_sim_finish()
+
+
+func _start_online() -> void:
+	var local := 0 if _net.is_host else 1
+	_build_world(_net.match_seed)
+	ControlSettings.use_default_tuning()   # 両方の端末で同じ動きの数値にする(保存はしない)
+	cam_index = local
+	var transport: NetTransport = _net
+	if _args.has("net-lag") or _args.has("net-loss"):
+		transport = LagTransport.new(_net, int(_args.get("net-lag", "0")), int(_args.get("net-jitter", "0")),
+			float(_args.get("net-loss", "0")))
+	_session = RollbackSession.new(sim, local, transport, _net.input_delay)
+	if _args.has("cpu-both") or _args.has("sim"):
+		_attach_cpu(local)
+	_net_state = "playing"
+	print("NET start as %dP seed=%d delay=%d" % [local + 1, _net.match_seed, _net.input_delay])
+
+
+## 通信の状態(画面の隅に出す)
+func _net_status() -> String:
+	if _net == null:
+		return ""
+	match _net_state:
+		"waiting":
+			return "接続を待っています…" if _net.is_host else "接続中…"
+		"lost":
+			return "通信が切れました"
+		"desync":
+			return "同期がずれました (frame %d)" % _session.desync_frame
+	return "ping %d ms  巻き戻し %d" % [roundi(_session.rtt * 1000.0 / 60.0), _session.rollbacks]
+
+
 ## Simulation の出来事を、演出・表示・ログにする
-func _handle_events() -> void:
-	for ev in sim.events:
+func _handle_events(events: Array) -> void:
+	for ev in events:
 		match ev[0]:
 			"move":
 				players[ev[1]].on_move_event(ev[2])
 			"round_start":
 				_cam_ready = false   # ラウンド開始時はカメラを追いかけさせず、その場に切り替える
-				hud.show_banner("")
 			"star_spawn":
 				_log("STAR SPAWN point %d at (%.1f, %.1f)" % [ev[1] + 1, sim.star_x, sim.star_y])
 			"star":
@@ -156,22 +252,28 @@ func _handle_events() -> void:
 					why = " target=(%.1f, %.1f)" % [b.target.x, b.target.y]
 				_log("MISS %dP at (%.1f, %.1f)%s" % [ev[1] + 1, ev[2], ev[3], why])
 			"round_end":
-				_end_round(ev[1])
+				_sim_rounds += 1
+				print("ROUND %d: %dP wins (1P %d - %d 2P) t=%.1fs" % [
+					_sim_rounds, ev[1] + 1, rules.wins[0], rules.wins[1], _time])
 			"match_over":
 				if _args.has("sim"):
 					_sim_finish(ev[1])
 
 
-func _end_round(w: int) -> void:
-	_sim_rounds += 1
+## ラウンドの結果の表示。通信対戦では巻き戻しで出来事が取り消されることがあるので、出来事ではなく状態から決める
+func _banner_text() -> String:
+	if sim.wait <= 0 or rules.round_winner < 0:
+		return ""
+	var w := rules.round_winner
 	if rules.match_winner >= 0:
-		hud.show_banner("%dP WINS THE MATCH!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]])
-	else:
-		hud.show_banner("%dP WIN!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]])
-	print("ROUND %d: %dP wins (1P %d - %d 2P) t=%.1fs" % [_sim_rounds, w + 1, rules.wins[0], rules.wins[1], _time])
+		return "%dP WINS THE MATCH!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]]
+	return "%dP WIN!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]]
 
 
 func _process(dt: float) -> void:
+	if sim == null:
+		hud.show_banner(_net_status())
+		return
 	for i in 2:
 		players[i].invuln = rules.invuln[i]
 		players[i].sync(dt)
@@ -183,7 +285,12 @@ func _process(dt: float) -> void:
 	_wrap_all()
 	_big_star.rotate_y(dt * 2.0)
 	var star_x := sim.star_x if sim.star_visible else -1.0
-	hud.update(rules, [sim.players[0].x, sim.players[1].x], star_x, map.width)
+	hud.update(rules, [sim.players[0].x, sim.players[1].x], star_x, map.width, cam_index)
+	var banner := _banner_text()
+	if _net_state == "lost" or _net_state == "desync":
+		banner = _net_status()
+	hud.show_banner(banner)
+	hud.show_status(_net_status())
 
 
 ## 落ちたスター・成長アイテムの見た目を、Simulation の中身に合わせて出し入れする
@@ -468,7 +575,13 @@ func _sim_check(dt: float) -> void:
 func _sim_finish(winner := -1) -> void:
 	print("SIM RESULT: winner=%dP rounds=%d time=%.1fs stuck=%d checksum=%d" % [
 		winner + 1, _sim_rounds, _time, _sim_stuck, sim.checksum()])
-	get_tree().quit(1 if _sim_stuck > 0 or winner < 0 else 0)
+	var bad := _sim_stuck > 0 or winner < 0
+	if _session != null:
+		print("NET RESULT: frame=%d rollbacks=%d (%d frames) stalls=%d waits=%d rtt=%.1fms checks=%d desync=%d" % [
+			sim.frame, _session.rollbacks, _session.rollback_frames, _session.stalls, _session.waits,
+			_session.rtt * 1000.0 / 60.0, _session.checks_compared, _session.desync_frame])
+		bad = bad or _session.desync_frame >= 0
+	get_tree().quit(1 if bad else 0)
 
 
 func _setup_input() -> void:

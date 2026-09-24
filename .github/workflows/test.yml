@@ -28,3 +28,14 @@ jobs:
           done
       - name: 乱数操作の耐久テスト(10分ぶん。位置が壊れない・消えない・画面外に出ない)
         run: godot --headless --path . --fixed-fps 60 --disable-vsync -- --soak=600 --seed=7 | grep -E "SOAK"; test ${PIPESTATUS[0]} -eq 0
+      - name: 通信対戦の自動試合(2つのプロセスをUDPでつなぎ、遅延・ロスありで最後まで同期がずれないこと)
+        run: |
+          godot --headless --path . -- --host=24680 --sim --net-lag=40 --net-jitter=20 --net-loss=0.03 > host.log 2>&1 &
+          sleep 2
+          join_status=0
+          godot --headless --path . -- --join=127.0.0.1:24680 --sim --net-lag=40 --net-jitter=20 --net-loss=0.03 > join.log 2>&1 || join_status=$?
+          host_status=0
+          wait %1 || host_status=$?
+          grep -E "NET|SIM" host.log join.log
+          test $host_status -eq 0 && test $join_status -eq 0
+          test "$(grep -h 'SIM RESULT' host.log join.log | sed 's/.*checksum=//' | sort -u | wc -l)" -eq 1

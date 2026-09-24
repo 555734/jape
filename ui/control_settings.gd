@@ -107,6 +107,12 @@ func save_settings() -> void:
 	changed.emit()
 
 
+## 通信対戦用: 動きの数値を標準に戻す(両方の端末で同じにするため)。保存はしないので、次に起動すれば元に戻る
+func use_default_tuning() -> void:
+	for key in _defaults:
+		Tuning.set_value(key, _defaults[key])
+
+
 func reset_tuning() -> void:
 	for key in _defaults:
 		Tuning.set_value(key, _defaults[key])
