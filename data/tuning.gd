@@ -2,42 +2,49 @@ class_name Tuning
 ## 動きの数値。単位はマス(=1m)と秒。根拠は docs/RULES.md の「3. 動きの数値」。
 ## ゲーム内の調整パネルから実機で変えられるよう、定数ではなく変数にしている。
 
-# 歩き・ダッシュ
-static var WALK_SPEED := 5.6          ## 動画実測
-static var RUN_SPEED := 11.3          ## 動画実測。TASVideosの解析(3.0ドット/フレーム)と一致
-static var WALK_ACCEL := 5.6 / 0.4    ## 0.4秒で最高速【決定・調整】
-static var RUN_ACCEL := 11.3 / 0.4
-static var STOP_DECEL := 5.6 / 0.2    ## 0.2秒で停止【決定・調整】
-static var SKID_MIN_SPEED := 3.0      ## この速さ以上で逆に入れると切り返し(スキッド)【推測・調整】
-static var SKID_DECEL := 35.0         ## 切り返し中の減速(ダッシュから約0.3秒で止まる)【推測・調整】
-static var AIR_ACCEL_RATE := 0.85     ## 空中の加速は地上の何倍か【推測・調整】
+## 標準の値を変えたら上げる(端末に保存された古い調整値を無視させるため。ui/control_settings.gd)
+const VERSION := 2
 
-# ジャンプ
-static var GRAVITY_UP := 36.0         ## 動画実測(地面基準): 高さ4.5マスを0.5秒で上昇
-static var GRAVITY_DOWN := 42.0       ## 動画実測(地面基準): 6.8マスを0.57秒で落下
-static var GRAVITY_CUT := 80.0        ## 上昇中にボタンを離したとき(低いジャンプ)【決定・調整】
-static var MAX_FALL := 24.0           ## 6.8マスの落下(0.57秒)で頭打ちにならない値【決定・調整】
-static var RUN_JUMP_HEIGHT := 4.5     ## 動画実測(地面基準、9.7秒のジャンプ)
-static var STAND_JUMP_HEIGHT := 3.6   ## 【推測・調整】助走ジャンプの8割
+# v2(2026-09): 実機で「軽すぎる・速すぎて何が起きているかわからない」との指摘を受け、原作の実測値から
+# 意図して離した。横の速さを約6〜7割に落とし、ジャンプを低く、落下を上昇より大きく速くして重さを出す。
+# 原作の実測値は docs/RULES.md §3 の「原作の実測」列に残してある。
+
+# 歩き・ダッシュ
+static var WALK_SPEED := 3.8          ## 【決定・調整】原作実測 5.6
+static var RUN_SPEED := 7.0           ## 【決定・調整】原作実測 11.3
+static var WALK_ACCEL := 3.8 / 0.35   ## 0.35秒で最高速【決定・調整】
+static var RUN_ACCEL := 7.0 / 0.45    ## ダッシュは0.45秒で最高速(走り出しに重さ)【決定・調整】
+static var STOP_DECEL := 3.8 / 0.15   ## 0.15秒で停止(止まりたい所で止まれる)【決定・調整】
+static var SKID_MIN_SPEED := 2.5      ## この速さ以上で逆に入れると切り返し(スキッド)【推測・調整】
+static var SKID_DECEL := 28.0         ## 切り返し中の減速(ダッシュから0.25秒で止まる)【推測・調整】
+static var AIR_ACCEL_RATE := 0.75     ## 空中の加速は地上の何倍か(空中で流されにくく)【推測・調整】
+
+# ジャンプ: 上昇0.42秒・同じ高さの落下は0.3秒(落ちるほうが速い=重さ)
+static var GRAVITY_UP := 43.0         ## 【決定・調整】高さ3.8マスを約0.42秒で上昇
+static var GRAVITY_DOWN := 82.0       ## 【決定・調整】落下は上昇の約2倍の重力
+static var GRAVITY_CUT := 120.0       ## 上昇中にボタンを離したとき(低いジャンプ)【決定・調整】
+static var MAX_FALL := 22.0           ## 最大落下速度【決定・調整】
+static var RUN_JUMP_HEIGHT := 3.8     ## 【決定・調整】原作実測 4.5。3マスの段差に余裕をもって届く
+static var STAND_JUMP_HEIGHT := 3.2   ## 【推測・調整】助走ジャンプの約85%
 
 # 3段ジャンプ(原作に存在【Wiki】。数値は【推測・調整】)
 static var TRIPLE_WINDOW := 0.12      ## 着地からこの秒数以内に跳ぶと次の段になる
-static var TRIPLE_MIN_SPEED := 4.5    ## この横速度以上で走っていること
-static var JUMP2_HEIGHT := 5.3        ## 2段目(動画実測: 16秒の着地直後のジャンプ)
-static var JUMP3_HEIGHT := 6.2        ## 3段目(宙返り)【推測・調整】動画に映っていない
+static var TRIPLE_MIN_SPEED := 3.5    ## この横速度以上で走っていること
+static var JUMP2_HEIGHT := 4.5        ## 2段目
+static var JUMP3_HEIGHT := 5.3        ## 3段目(宙返り)
 
 # 壁すべり・壁キック(原作に存在【Wiki】。入力制限16フレームは【TAS】、他は【推測・調整】)
-static var WALL_SLIDE_SPEED := 3.0    ## 壁に張り付いて滑り落ちる速さ
-static var WALL_KICK_SPEED_X := 7.5   ## 壁キックで反対へ飛ぶ横速度
-static var WALL_KICK_HEIGHT := 4.0    ## 壁キックの高さ
+static var WALL_SLIDE_SPEED := 2.5    ## 壁に張り付いて滑り落ちる速さ
+static var WALL_KICK_SPEED_X := 5.5   ## 壁キックで反対へ飛ぶ横速度
+static var WALL_KICK_HEIGHT := 3.3    ## 壁キックの高さ
 static var WALL_KICK_LOCK_FRAMES := 16    ## 壁キック直後に壁方向の入力を受け付けないフレーム数【TAS】
 
 # ヒップドロップ・踏みつけ・しゃがみ【推測・調整】
 static var GP_HOVER := 0.25           ## 空中で1回転して止まる時間
 static var GP_SPEED := 24.0           ## 急降下の速さ
 static var GP_LAND_STUN := 0.2        ## 着地後に動けない時間
-static var STOMP_BOUNCE_LOW := 1.5    ## 踏んだときの跳ね返り(マス)
-static var STOMP_BOUNCE_HIGH := 4.5   ## 踏んだ瞬間にジャンプを押していたとき
+static var STOMP_BOUNCE_LOW := 1.2    ## 踏んだときの跳ね返り(マス)
+static var STOMP_BOUNCE_HIGH := 3.6   ## 踏んだ瞬間にジャンプを押していたとき
 static var CROUCH_HEIGHT := 1.0       ## 大きい状態でしゃがんだときの高さ
 
 

@@ -1,6 +1,6 @@
 class_name Grassland
 extends Node3D
-## 草原ステージの見た目(横48×縦14マス、左右ループ)。構成の数は docs/RULES.md §8【FAQ】、地形は独自。
+## 草原ステージの見た目(横64×縦14マス、左右ループ)。構成の数は docs/RULES.md §8【FAQ】、地形は独自。
 ## 地図と当たり判定は StageMap、コイン・敵・?ブロックの状態は Simulation が持ち、ここはそれを映すだけ。
 
 var map: StageMap
@@ -105,9 +105,9 @@ func _build_terrain(offset: int) -> void:
 
 
 func _build_background() -> void:
-	for i in 7:
+	for i in int(width / 7.0):
 		_deco(Assets.CLOUD, Vector3(3 + i * 7, 11.0 + (i % 2), -6), 1.5)
-	for i in 6:
+	for i in int(width / 8.0):
 		var t := _deco(Assets.TREE, Vector3(1 + i * 8, 1, -3), 3.0)
 		t.rotation_degrees.y = i * 40
 

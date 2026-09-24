@@ -161,7 +161,7 @@ class SimPlayer:
 
 ## 歩くだけの敵。壁か足場の端で向きを変える。踏まれると倒れる
 class SimWalker:
-	const SPEED := 1.5          ## マス/秒【決定・調整】
+	const SPEED := 1.1          ## マス/秒【決定・調整】(v2で1.5から遅く)
 	const SIZE := 0.9
 	const WIDTH := 0.8
 	const SQUASH_FRAMES := 24   ## 踏まれてから消えるまで(0.4秒)

@@ -3,7 +3,7 @@ extends RefCounted
 ## CPUの操作。目標を決めて、そこへ向かう入力を毎フレーム作る。
 ## 目標の優先順位: ビッグスター > 落ちたスター > スターを持った相手 > アイテム > コイン > 相手
 
-const REACH_UP := 4.2        ## 1回のジャンプで確実に届く高さ(マス)
+const REACH_UP := 3.3        ## 1回のジャンプで確実に届く高さ(マス)。助走ジャンプ3.8マスより少し低く
 const STUCK_TIME := 1.2      ## この秒数ほぼ動かなければ「詰まった」とみなす
 
 var me: Simulation.SimPlayer
@@ -47,7 +47,7 @@ func think(dt: float) -> PlayerInput:
 		move = signf(dx)
 	# 目標が上にあり、頭上が足場でふさがっていたら、まず足場の端まで移動する
 	var blocked := false
-	if dy > 0.8 and me.is_on_floor() and _ceiling(stage, 0.0):
+	if dy > 0.8 and absf(dx) < 3.0 and me.is_on_floor() and _ceiling(stage, 0.0):   # 真上に近い目標のときだけ(遠い目標なら先へ進めばよい)
 		var side := _nearest_open_side(stage)
 		if side != 0.0:
 			move = side

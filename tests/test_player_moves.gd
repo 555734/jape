@@ -56,10 +56,10 @@ func _run_in() -> void:
 func test_walk_and_run_speed() -> void:
 	_fresh()
 	_hold(PlayerInput.make(1, false, false, false), 60)
-	assert_near(m.vel.x, 5.6, 0.28, "歩き最高速 (マス/秒)")
+	assert_near(m.vel.x, 3.8, 0.19, "歩き最高速 (マス/秒)")
 	_fresh()
 	_run_in()
-	assert_near(m.vel.x, 11.3, 0.565, "ダッシュ最高速 (マス/秒)")
+	assert_near(m.vel.x, 7.0, 0.35, "ダッシュ最高速 (マス/秒)")
 
 
 func test_running_jump_height_and_timing() -> void:
@@ -71,16 +71,17 @@ func test_running_jump_height_and_timing() -> void:
 		_frame(PlayerInput.make(1, true, false, true))
 		up += 1
 	var down := _until_land(PlayerInput.make(1, true, false, true))
-	assert_near(peak, 4.5, 0.225, "助走ジャンプの高さ (マス)")
-	assert_near(up * DT, 0.5, 0.025, "上昇時間 (秒)")
-	assert_near(down * DT, sqrt(2.0 * 4.5 / 42.0), 0.025, "落下時間 (秒)")
+	assert_near(peak, 3.8, 0.19, "助走ジャンプの高さ (マス)")
+	assert_near(up * DT, 0.42, 0.025, "上昇時間 (秒)")
+	assert_near(down * DT, sqrt(2.0 * 3.8 / 82.0), 0.025, "落下時間 (秒)")
+	assert_true(down < up * 0.8, "落下は上昇より速い(重さ) 上昇%dF 落下%dF" % [up, down])
 
 
 func test_standing_and_short_jump() -> void:
 	_fresh()
 	_frame(PlayerInput.make(0, false, true, true))
 	_until_land(PlayerInput.make(0, false, false, true))
-	assert_near(peak, 3.6, 0.18, "立ちジャンプの高さ (マス)")
+	assert_near(peak, 3.2, 0.16, "立ちジャンプの高さ (マス)")
 	_fresh()
 	_frame(PlayerInput.make(0, false, true, true))
 	_hold(PlayerInput.make(0, false, false, true), 2)
@@ -105,9 +106,9 @@ func test_triple_jump() -> void:
 	_fresh()
 	_run_in()
 	var h := _triple(2)
-	assert_near(h[0], 4.5, 0.225, "3段ジャンプ 1段目 (マス)")
-	assert_near(h[1], 5.3, 0.265, "3段ジャンプ 2段目 (マス)")
-	assert_near(h[2], 6.2, 0.31, "3段ジャンプ 3段目 (マス)")
+	assert_near(h[0], 3.8, 0.19, "3段ジャンプ 1段目 (マス)")
+	assert_near(h[1], 4.5, 0.225, "3段ジャンプ 2段目 (マス)")
+	assert_near(h[2], 5.3, 0.265, "3段ジャンプ 3段目 (マス)")
 	assert_true(m.jump_stage == 2, "3段目になっている")
 
 
@@ -138,7 +139,7 @@ func test_skid() -> void:
 	while m.vel.x > 0.0 and frames < 120:
 		_frame(PlayerInput.make(-1, true, false, false))
 		frames += 1
-	assert_near(frames * DT, 11.3 / Tuning.SKID_DECEL, 0.05, "切り返しで止まるまでの秒数")
+	assert_near(frames * DT, Tuning.RUN_SPEED / Tuning.SKID_DECEL, 0.05, "切り返しで止まるまでの秒数")
 
 
 func test_wall_slide_and_kick() -> void:

@@ -10,20 +10,20 @@ extends RefCounted
 ## 計算は GDScript の実数(倍精度)の四則演算だけで行う。
 
 const GRASSLAND := [
-	"                                                ",
-	"                                                ",
-	"                                                ",
-	"         2                            3         ",
-	"        CCCC                        CCCC        ",
-	"              ooo                               ",
-	"               4        6       5               ",
-	"             CCCCC            CCCCC             ",
-	"                                                ",
-	"                                                ",
-	"        B?BB            1           BB?B        ",
-	"  PP               ooo CC ooo               PP  ",
-	"  PP S            E   CCCC   E     E      T PP  ",
-	"###################  ######  ###################",
+	"                                                                ",
+	"                                                                ",
+	"                                                                ",
+	"         2                                            3         ",
+	"        CCCC                                        CCCC        ",
+	"              ooo                                               ",
+	"               4               6                5               ",
+	"             CCCCC                            CCCCC             ",
+	"                                                                ",
+	"                                                                ",
+	"        B?BB                   1                    BB?B        ",
+	"  PP                       ooo CC ooo                       PP  ",
+	"  PP S            E          ECCCC           E            T PP  ",
+	"#######################  ##############  #######################",
 ]
 ## 動き確認用の練習ステージ(平らな地面と、壁キック用の高い壁)
 const PRACTICE := [
