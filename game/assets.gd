@@ -1,20 +1,20 @@
 class_name Assets
-## 素材(Quaternius Ultimate Platformer Pack, CC0)の読み込みと大きさ合わせ。
+## キャラクター素材と、ステージ専用に制作した立体アセットの読み込み。
 
 const ROOT := "res://assets/third_party/quaternius_platformer/"
 const CHARACTER := "res://assets/third_party/quaternius_characters/Casual_Male.gltf"
-const GRASS := "Cubes/glTF/Cube_Grass_Single.gltf"
-const DIRT := "Cubes/glTF/Cube_Dirt_Single.gltf"
-const BRICK := "Cubes/glTF/Cube_Bricks.gltf"
-const QUESTION := "Cubes/glTF/Cube_Question.gltf"
-const CRATE := "Cubes/glTF/Cube_Crate.gltf"
-const PIPE := "Level and Mechanics/glTF/Pipe_End.gltf"
-const COIN := "Powerups and Pickups/glTF/Coin.gltf"
-const STAR := "Powerups and Pickups/glTF/Star.gltf"
-const ENEMY := "Enemies/glTF/Enemy.gltf"
+const GRASS := "art:grass"
+const DIRT := "art:dirt"
+const BRICK := "art:brick"
+const QUESTION := "art:question"
+const CRATE := "art:crate"
+const PIPE := "art:pipe"
+const COIN := "art:coin"
+const STAR := "art:star"
+const ENEMY := "art:enemy"
 const CLOUD := "Nature/glTF/Cloud_2.gltf"
 const TREE := "Nature/glTF/Tree.gltf"
-const GROW_ITEM := "Powerups and Pickups/glTF/Heart.gltf"
+const GROW_ITEM := "art:grow"
 
 ## プレイヤーの配色(素材の色が暗すぎるため部品名ごとに塗り直す)。[1P, 2P]
 const PLAYER_PALETTE := {
@@ -30,6 +30,10 @@ static var _cache := {}
 
 ## 素材を読み込み、高さ height マス・足元(下端)が原点になるよう調整したノードを返す
 static func spawn(path: String, height: float) -> Node3D:
+	if path.begins_with("art:"):
+		var art := StageArt.make(path.trim_prefix("art:"))
+		art.scale = Vector3.ONE * height
+		return art
 	if not _cache.has(path):
 		_cache[path] = load(path if path.begins_with("res://") else ROOT + path)
 	var inner: Node3D = (_cache[path] as PackedScene).instantiate()
@@ -44,6 +48,8 @@ static func spawn(path: String, height: float) -> Node3D:
 
 ## 骨を持たない置物用: 幅と高さを別々に合わせる(土管など)
 static func spawn_box(path: String, width: float, height: float) -> Node3D:
+	if path == PIPE:
+		return StageArt.pipe(width, height)
 	var holder := spawn(path, height)
 	var inner: Node3D = holder.get_child(0)
 	var b := bounds(inner)

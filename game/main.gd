@@ -9,7 +9,7 @@ extends Node3D
 ##   --seed=N          乱数の種(再現用)
 
 const VIEW_TILES_Y_ORIGINAL := 12.0   ## 原作の画面は縦12マス【動画】
-const GROUND_MARGIN := 3.0      ## 足場を画面下から何マス上に見せるか(タッチ操作の親指と重ならないように)
+const GROUND_MARGIN := 2.2      ## 足場を画面下から何マス上に見せるか
 const CAM_TAU_X := 0.08         ## 横の追従の速さ(秒。小さいほど速い)
 const CAM_TAU_Y := 0.18         ## 縦の追従の速さ
 const CAM_TAU_FALL := 0.05      ## 落下中・画面端に近いときの縦の追従
@@ -387,7 +387,7 @@ func _update_camera(dt: float) -> void:
 
 ## 左右ループの見た目: 全員をカメラに一番近い周回位置に表示する
 func _wrap_all() -> void:
-	stage.wrap_visuals(_cam_x)
+	stage.wrap_visuals(_cam_x, _cam_y)
 	for p in players:
 		p.set_view_shift(map.image_x(p.position.x, _cam_x) - p.position.x)
 	for views in [_drop_views, _item_views]:
@@ -649,12 +649,15 @@ func _setup_input() -> void:
 
 func _setup_environment() -> void:
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-50, -25, 0)
+	sun.rotation_degrees = Vector3(-45, -28, -22)
+	sun.shadow_enabled = true
+	sun.light_energy = 0.85
 	add_child(sun)
 	var env := WorldEnvironment.new()
 	env.environment = Environment.new()
 	env.environment.background_mode = Environment.BG_COLOR
 	env.environment.background_color = Color(0.55, 0.78, 0.98)
 	env.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.environment.ambient_light_color = Color(0.75, 0.75, 0.8)
+	env.environment.ambient_light_color = Color(0.68, 0.72, 0.77)
+	env.environment.ambient_light_energy = 0.75
 	add_child(env)

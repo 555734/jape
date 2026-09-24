@@ -15,6 +15,7 @@ var height: int:
 
 var _wrap_nodes: Array[Node3D] = []
 var _dirt: MeshInstance3D
+var _background: MeshInstance3D
 var _coins: Array[Node3D] = []
 var _enemies: Array[Walker] = []
 var _block_nodes := {}
@@ -63,6 +64,11 @@ func _build_terrain(offset: int) -> void:
 				"#":
 					_deco(Assets.GRASS, pos, 1.0)
 					_deco(Assets.DIRT, pos - Vector3(0, 1, 0), 1.0)
+					if y == 0 and x % 6 == 3 and tile(x, 1) == " ":
+						var blossom := StageArt.flower(int(x / 6))
+						blossom.position = Vector3(pos.x + 0.15, 1.02, 0.28)
+						add_child(blossom)
+						_register(blossom)
 				"B":
 					_deco(Assets.BRICK, pos, 1.0)
 				"?":
@@ -95,7 +101,7 @@ func _build_terrain(offset: int) -> void:
 	var bm := BoxMesh.new()
 	bm.size = Vector3(width, 6, 3)
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.72, 0.45, 0.3)
+	mat.albedo_color = Color("9c6543")
 	bm.material = mat
 	dirt.mesh = bm
 	bm.size = Vector3(80, 6, 3)   # 画面より広い。カメラに合わせて横に動かす
@@ -105,11 +111,17 @@ func _build_terrain(offset: int) -> void:
 
 
 func _build_background() -> void:
-	for i in int(width / 7.0):
-		_deco(Assets.CLOUD, Vector3(3 + i * 7, 11.0 + (i % 2), -6), 1.5)
-	for i in int(width / 8.0):
-		var t := _deco(Assets.TREE, Vector3(1 + i * 8, 1, -3), 3.0)
-		t.rotation_degrees.y = i * 40
+	_background = MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(54, 28)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = load("res://assets/art/meadow_panorama.png")
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.material = mat
+	_background.mesh = quad
+	_background.position.z = -18.0
+	add_child(_background)
 
 
 func _deco(path: String, pos: Vector3, h: float) -> Node3D:
@@ -128,7 +140,11 @@ func _register(n: Node3D) -> void:
 
 ## 左右ループの見た目: すべての部品をカメラに一番近い周回位置へ置き直す。
 ## 画面の幅(約18〜22マス)はステージ(48マス)より狭いので、同じ物が2つ見えることはない。
-func wrap_visuals(cam_x: float) -> void:
+func wrap_visuals(cam_x: float, cam_y: float = 0.0) -> void:
+	if _background:
+		_background.position.x = cam_x
+		# 茂みを地面の少し上に見せ、遠景の丘に奥行きをつける。
+		_background.position.y = cam_y + 5.0
 	for n in _wrap_nodes:
 		n.position.x = map.image_x(n.get_meta("lx"), cam_x)
 	for c in _coins:
