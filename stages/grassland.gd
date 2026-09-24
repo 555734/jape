@@ -21,10 +21,29 @@ const MAP := [
 	"  P  S            E   CCCC   E     E      T  P  ",
 	"###################  ######  ###################",
 ]
+## 動き確認用の練習ステージ(平らな地面と、壁キック用の高い壁)
+const PRACTICE := [
+	"                                                                                ",
+	"                                                                                ",
+	"                                                                                ",
+	"                                                                  CC            ",
+	"                                                                  CC            ",
+	"                                    3                             CC            ",
+	"                                                                  CC            ",
+	"                        2                                         CC    6       ",
+	"                                                4                 CC            ",
+	"                                                                  CC            ",
+	"            1                                               5     CC            ",
+	"  P                                                               CC         P  ",
+	"  P  S                                                            CC      T  P  ",
+	"################################################################################",
+]
 const SOLID := "#B?CP"
 const WRAP_COPY := 14   ## ループの継ぎ目が見えるよう、端から何列を反対側にも複製するか
 
 signal coin_taken(coin: Node3D)
+
+var map: Array = MAP        ## 使う地図(練習ステージに差し替え可)
 
 var width := 0
 var height := 0
@@ -41,8 +60,8 @@ var _block_nodes := {}
 
 
 func _ready() -> void:
-	height = MAP.size()
-	width = MAP[0].length()
+	height = map.size()
+	width = map[0].length()
 	star_points.resize(6)
 	var pipe_x: Array[int] = []
 	for y in height:
@@ -79,7 +98,7 @@ func _ready() -> void:
 func tile(x: int, y: int) -> String:
 	if y < 0 or y >= height:
 		return " "
-	return MAP[height - 1 - y][posmod(x, width)]
+	return map[height - 1 - y][posmod(x, width)]
 
 
 func is_solid(x: int, y: int) -> bool:

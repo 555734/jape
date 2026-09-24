@@ -9,6 +9,7 @@ extends Node3D
 ##   --seed=N          乱数の種(再現用)
 
 const VIEW_TILES_Y := 12.0
+const GROUND_MARGIN := 3.0      ## 足場を画面下から何マス上に見せるか(タッチボタンと重ならないように)
 const FOV := 30.0
 const ROUND_END_WAIT := 3.0
 const MATCH_END_WAIT := 5.0
@@ -23,6 +24,7 @@ var camera: Camera3D
 var hud: Hud
 
 var _big_star: Node3D
+var _cam_floor_y := -1.0
 var _drops := {}                ## drop_id -> DroppedStar
 var _items: Array[Node3D] = []
 var _wait := 0.0
@@ -52,6 +54,8 @@ func _ready() -> void:
 
 	rules = MatchRules.new(_rng.randi())
 	stage = Grassland.new()
+	if _args.has("practice"):
+		stage.map = Grassland.PRACTICE
 	add_child(stage)
 	rules.star_point_count = stage.star_points.size()
 
@@ -64,7 +68,11 @@ func _ready() -> void:
 		p.bumped_block.connect(_on_bumped_block.bind(i))
 		p.respawned.connect(func() -> void: rules.spawn_protect(i))
 		players.append(p)
+	if _args.has("demo-moves"):
+		players[0].input_source = _demo_moves_input
 	for i in 2:
+		if _args.has("demo-moves") and i == 0:
+			continue
 		if i == 1 or _args.has("cpu-both") or _args.has("sim"):
 			brains[i] = CpuBrain.new(players[i], players[1 - i], self, _rng.randi())
 			var b: CpuBrain = brains[i]
@@ -82,6 +90,7 @@ func _ready() -> void:
 	add_child(hud)
 	if not _args.has("cpu-both") and not _args.has("sim"):
 		add_child(TouchControls.new())
+		add_child(SettingsPanel.new())
 	_start_round()
 
 
@@ -152,11 +161,19 @@ func _physics_process(dt: float) -> void:
 func _process(_dt: float) -> void:
 	var dist := (VIEW_TILES_Y * 0.5) / tan(deg_to_rad(FOV * 0.5))
 	var p := players[0]
-	var cy := clampf(p.position.y + 2.5, 6.0, 8.0)
+	# 縦のカメラ: 原作と同じく、普通のジャンプでは動かさない。
+	# 最後に立った足場を画面下から GROUND_MARGIN マスの位置に置き、画面上端に近づいたときだけ上げる
+	if p.is_on_floor() or _cam_floor_y < 0.0:
+		_cam_floor_y = p.position.y
+	var cy := _cam_floor_y + VIEW_TILES_Y * 0.5 - GROUND_MARGIN
+	cy = maxf(cy, p.position.y + p.height() + 1.5 - VIEW_TILES_Y * 0.5)   # 頭が上端に近づいたら追う
+	cy = clampf(cy, VIEW_TILES_Y * 0.5 - GROUND_MARGIN, stage.height - VIEW_TILES_Y * 0.5 + 1.0)
+	cy = lerpf(camera.position.y if camera.position.y != 0.0 else cy, cy, 0.1)
 	var cx := p.position.x
 	if absf(cx - camera.position.x) > stage.width * 0.5:
 		camera.position.x = cx   # ループで反対側へ移ったら一緒に飛ぶ
-	camera.position = Vector3(lerpf(camera.position.x, cx, 0.25), cy, dist)
+	cx += p.moves.facing * 1.5   # 進行方向を少し先まで見せる
+	camera.position = Vector3(lerpf(camera.position.x, cx, 0.12), cy, dist)
 	_big_star.rotate_y(_dt * 2.0)
 	var star_x := _big_star.position.x if _big_star.visible else -1.0
 	hud.update(rules, [players[0].position.x, players[1].position.x], star_x, stage.width)
@@ -370,6 +387,57 @@ func cpu_target(i: int) -> Vector3:
 
 # ---- 開発用 -------------------------------------------------------------
 
+var _demo := {"phase": 0, "jumps": 0, "was_floor": true, "t": 0}
+
+## --demo-moves: 右へダッシュ → 3段ジャンプ → 壁すべり → 壁キック → ヒップドロップ を自動で行う
+func _demo_moves_input() -> PlayerInput:
+	var p := players[0]
+	var d := _demo
+	d.t += 1
+	var on_floor := p.is_on_floor()
+	var landed: bool = on_floor and not d.was_floor
+	d.was_floor = on_floor
+	var st := p.moves.state
+	match d.phase:
+		0:   # 助走
+			if p.position.x > 12.0:
+				d.phase = 1
+			return PlayerInput.make(1, true, false, false)
+		1:   # 3段ジャンプ: 着地した瞬間にまた跳ぶ
+			if d.jumps == 0 or landed:
+				if d.jumps >= 3:
+					d.phase = 2
+					return PlayerInput.make(1, true, false, false)
+				d.jumps += 1
+				return PlayerInput.make(1, true, true, true)
+			return PlayerInput.make(1, true, false, p.velocity.y > 0.0)
+		2:   # 壁の手前でジャンプし、壁に押し付ける
+			if on_floor and p.position.x > 60.0:
+				d.phase = 3
+				return PlayerInput.make(1, true, true, true)
+			return PlayerInput.make(1, true, false, false)
+		3:   # 壁すべりを少し見せてから壁キック
+			if st == PlayerMoves.State.WALL_SLIDE:
+				d.t = 0
+				d.phase = 4
+			return PlayerInput.make(1, true, false, true)
+		4:
+			if d.t > 25:
+				d.phase = 5
+				d.t = 0
+				return PlayerInput.make(1, true, true, true)
+			return PlayerInput.make(1, true, false, false)
+		5:   # 壁キックで飛んだあと、空中でヒップドロップ
+			if d.t == 28:
+				return PlayerInput.make(0, false, false, false, true, true)
+			if d.t > 28:
+				if on_floor and d.t > 60:
+					d.phase = 6
+				return PlayerInput.make(0, false, false, false, true, false)
+			return PlayerInput.make(-1, true, false, true)
+	return PlayerInput.make(0, false, false, false)
+
+
 func _capture() -> void:
 	if not _args.has("capture"):
 		return
@@ -422,13 +490,31 @@ func _setup_input() -> void:
 		"jump": [KEY_SPACE, KEY_Z, KEY_UP],
 		"run": [KEY_SHIFT, KEY_X],
 	}
+	# ゲームコントローラー: 十字キー・左スティック / 下と右のボタン=ジャンプ、左と上のボタン=ダッシュ(DSのB/A・Y/Xと同じ位置)
+	var pad_buttons := {
+		"move_left": [JOY_BUTTON_DPAD_LEFT],
+		"move_right": [JOY_BUTTON_DPAD_RIGHT],
+		"move_down": [JOY_BUTTON_DPAD_DOWN],
+		"jump": [JOY_BUTTON_A, JOY_BUTTON_B],
+		"run": [JOY_BUTTON_X, JOY_BUTTON_Y],
+	}
+	var pad_axes := {"move_left": [JOY_AXIS_LEFT_X, -1.0], "move_right": [JOY_AXIS_LEFT_X, 1.0], "move_down": [JOY_AXIS_LEFT_Y, 1.0]}
 	for action in keys:
 		if not InputMap.has_action(action):
-			InputMap.add_action(action)
+			InputMap.add_action(action, 0.4)
 		for k in keys[action]:
 			var ev := InputEventKey.new()
 			ev.physical_keycode = k
 			InputMap.action_add_event(action, ev)
+		for b in pad_buttons.get(action, []):
+			var jb := InputEventJoypadButton.new()
+			jb.button_index = b
+			InputMap.action_add_event(action, jb)
+		if pad_axes.has(action):
+			var ja := InputEventJoypadMotion.new()
+			ja.axis = pad_axes[action][0]
+			ja.axis_value = pad_axes[action][1]
+			InputMap.action_add_event(action, ja)
 
 
 func _setup_environment() -> void:

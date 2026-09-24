@@ -11,6 +11,10 @@ func _initialize() -> void:
 		if not (f.begins_with("test_") and f.ends_with(".gd")) or f == "test_base.gd":
 			continue
 		var script: GDScript = load("res://tests/" + f)
+		if script == null or not script.can_instantiate():
+			total += 1
+			failed.append("%s (読み込み失敗)" % f)
+			continue
 		for m in script.get_script_method_list():
 			var name: String = m["name"]
 			if not name.begins_with("test_"):

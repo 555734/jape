@@ -1,37 +1,41 @@
 class_name Player
 extends CharacterBody3D
 ## 操作キャラ。判定は横(X)と縦(Y)の2次元だけで、奥行き(Z)は常に0。
-## 対戦ルール(スター・残機)は MatchRules が持ち、ここは動きと見た目だけを扱う。
+## 動きの計算は PlayerMoves、対戦ルール(スター・残機)は MatchRules が持つ。
+## ここは「動きを当たり判定に反映する」ことと「見た目の手応え」を担当する。
 
 const BIG_HEIGHT := 1.8     ## docs/RULES.md §2
 const SMALL_HEIGHT := 0.9
 const WIDTH := 0.8
-const GP_HOVER := 0.15      ## ヒップドロップ前の空中停止【決定・調整】
-const GP_SPEED := 24.0      ## ヒップドロップの落下速度【決定・調整】
 const RESPAWN_TIME := 1.5   ## ミスしてから土管から出てくるまで【決定・調整】
-const STOMP_BOUNCE := 11.0  ## 踏んだときの跳ね返り【決定・調整】
 
 signal bumped_block(x: int, y: int)
 signal fell
 signal respawned
+signal move_event(name: String)   ## 効果音・演出用("jump1" "land" "skid" "wall_kick" など)
 
 var index := 0
 var stage: Grassland
 var input_source: Callable = PlayerInput.from_actions
+var moves := PlayerMoves.new()
 var big := false
-var ground_pounding := false
 var dead := false
 var invuln := 0.0           ## 表示用(点滅)。値は MatchRules から毎フレーム受け取る
 var last_input := PlayerInput.new()
+var ground_pounding: bool:
+	get:
+		return moves.is_ground_pounding()
 
-var _model: Node3D
+var _model: Node3D          ## 向き・傾き・回転をかける入れ物
+var _body: Node3D           ## 素材のモデル本体
 var _shape: CollisionShape3D
 var _ap: AnimationPlayer
 var _anims := {}
-var _facing := 1.0
-var _gp_timer := 0.0
 var _respawn_timer := 0.0
 var _knock := 0.0
+var _squash := 0.0
+var _spin := 0.0
+var _dust: CPUParticles3D
 
 
 func _ready() -> void:
@@ -41,30 +45,41 @@ func _ready() -> void:
 	_shape = CollisionShape3D.new()
 	_shape.shape = BoxShape3D.new()
 	add_child(_shape)
-	_model = Assets.spawn(Assets.CHARACTER, BIG_HEIGHT)
+	_model = Node3D.new()
 	add_child(_model)
+	_body = Assets.spawn(Assets.CHARACTER, BIG_HEIGHT)
+	_model.add_child(_body)
 	if index == 1:
-		_recolor(_model)
-	_ap = Assets.find_anim_player(_model)
+		_recolor(_body)
+	_ap = Assets.find_anim_player(_body)
 	if _ap:
-		for key in ["Idle", "Walk", "Run", "Jump_Idle", "HitReact", "Duck"]:
+		for key in ["Idle", "Walk", "Run", "Jump", "Jump_Idle", "Jump_Land", "HitReact", "Duck"]:
 			var n := Assets.anim_name(_ap, key)
 			if n != &"":
 				_anims[key] = n
-				if key in ["Idle", "Walk", "Run", "Jump_Idle"]:
+				if key in ["Idle", "Walk", "Run", "Jump_Idle", "Duck"]:
 					_ap.get_animation(n).loop_mode = Animation.LOOP_LINEAR
+	_dust = _make_dust()
+	add_child(_dust)
 	set_big(false)
 
 
 func height() -> float:
-	return BIG_HEIGHT if big else SMALL_HEIGHT
+	var h := BIG_HEIGHT if big else SMALL_HEIGHT
+	if big and moves.state == PlayerMoves.State.CROUCH:
+		h = Tuning.CROUCH_HEIGHT
+	return h
 
 
 func set_big(value: bool) -> void:
 	big = value
+	moves.big = value
+	_update_shape()
+
+
+func _update_shape() -> void:
 	(_shape.shape as BoxShape3D).size = Vector3(WIDTH, height(), 1.0)
 	_shape.position.y = height() * 0.5
-	_model.scale = Vector3.ONE * (1.0 if big else 0.5)
 
 
 ## 足元の高さと頭の高さ
@@ -84,23 +99,22 @@ func _physics_process(delta: float) -> void:
 		return
 	var input: PlayerInput = input_source.call()
 	last_input = input
-	var v := Vector2(velocity.x, velocity.y)
 
-	if ground_pounding:
-		_gp_timer -= delta
-		v = Vector2(0.0, 0.0 if _gp_timer > 0.0 else -GP_SPEED)
-		if is_on_floor() and _gp_timer <= 0.0:
-			ground_pounding = false
-	else:
-		if input.down and not is_on_floor():
-			ground_pounding = true
-			_gp_timer = GP_HOVER
-			v = Vector2.ZERO
-		else:
-			v = PlayerMotor.step(v, is_on_floor(), input, delta)
+	var wall := 0
+	if is_on_wall() and not is_on_floor():
+		var n := get_wall_normal()
+		if absf(n.x) > 0.5:
+			wall = -int(signf(n.x))
+	var was_crouching := moves.state == PlayerMoves.State.CROUCH
+	moves.vel = Vector2(velocity.x, velocity.y)
+	var v := moves.step(is_on_floor(), wall, input, delta)
 	if _knock != 0.0:
 		v.x = _knock
+		moves.vel.x = _knock
 		_knock = move_toward(_knock, 0.0, 30.0 * delta)
+	if was_crouching != (moves.state == PlayerMoves.State.CROUCH):
+		_update_shape()
+
 	velocity = Vector3(v.x, v.y, 0.0)
 	var was_rising := velocity.y > 0.0
 	move_and_slide()
@@ -110,13 +124,18 @@ func _physics_process(delta: float) -> void:
 		bumped_block.emit(int(floor(position.x)), int(floor(top() + 0.1)))
 	if position.y < -3.0:
 		fell.emit()
-	_update_visual()
+	for e in moves.events:
+		_on_move_event(e)
+		move_event.emit(e)
+	_update_visual(delta)
 
 
-## 相手や敵を踏んだとき跳ね返る
+## 相手や敵を踏んだとき跳ね返る。ジャンプを押していれば高く
 func bounce() -> void:
-	velocity.y = STOMP_BOUNCE
-	ground_pounding = false
+	moves.vel = Vector2(velocity.x, velocity.y)
+	moves.stomp_bounce(last_input.jump_held)
+	velocity.y = moves.vel.y
+	move_event.emit("stomp")
 
 
 ## 横から弾かれる
@@ -134,7 +153,7 @@ func die() -> void:
 	dead = true
 	visible = false
 	velocity = Vector3.ZERO
-	ground_pounding = false
+	moves.reset()
 	_respawn_timer = RESPAWN_TIME
 	collision_layer = 0
 
@@ -143,6 +162,7 @@ func _respawn() -> void:
 	dead = false
 	visible = true
 	collision_layer = 2
+	moves.reset()
 	set_big(false)
 	position = stage.pipe_tops[index]
 	velocity = Vector3(0, 6, 0)
@@ -150,25 +170,120 @@ func _respawn() -> void:
 	respawned.emit()
 
 
-func _update_visual() -> void:
-	if absf(velocity.x) > 0.1:
-		_facing = signf(velocity.x)
-	_model.rotation_degrees.y = 90.0 * _facing
+# ---- 見た目の手応え -----------------------------------------------------
+
+func _on_move_event(e: String) -> void:
+	match e:
+		"land":
+			_squash = 0.12
+			_dust.restart()
+		"gp_land":
+			_squash = 0.2
+			_dust.restart()
+		"jump3", "gp_start":
+			_spin = 0.0
+
+
+func _update_visual(delta: float) -> void:
+	var st := moves.state
+	var facing := moves.facing
+	_model.rotation = Vector3.ZERO
+	_body.rotation_degrees.y = 90.0 * facing
+
+	# 前傾(走るほど前に倒れる)・切り返しは後ろへ反る
+	var lean := 0.0
+	if is_on_floor():
+		if st == PlayerMoves.State.SKID:
+			lean = 18.0
+		else:
+			lean = -clampf(absf(velocity.x) / Tuning.RUN_SPEED, 0.0, 1.0) * 10.0
+	_model.rotation_degrees.z = lean * facing
+
+	# 3段目の宙返り・ヒップドロップの回転(画面の面内で1回転)
+	if moves.flipping or (st == PlayerMoves.State.GROUND_POUND and velocity.y == 0.0):
+		var dur := 0.55 if moves.flipping else Tuning.GP_HOVER
+		_spin = minf(_spin + delta / dur, 1.0)
+		_model.rotation_degrees.z = -360.0 * _spin * facing
+		_model.position.y = height() * 0.5 * (1.0 if _spin < 1.0 else 0.0)
+		_body.position.y = -height() * 0.5 if _spin < 1.0 else 0.0
+	else:
+		_model.position.y = 0.0
+		_body.position.y = 0.0
+
+	# 着地の潰れ
+	var base := 1.0 if big else 0.5
+	var sy := 1.0
+	if _squash > 0.0:
+		_squash -= delta
+		sy = 0.75
+	if st == PlayerMoves.State.CROUCH:
+		sy = 0.6
+	_model.scale = Vector3(base * (2.0 - sy) if sy < 1.0 else base, base * sy, base)
+
+	# 砂ぼこり: ダッシュ・切り返し・壁すべり
+	var fast := is_on_floor() and absf(velocity.x) > Tuning.WALK_SPEED + 1.0
+	_dust.emitting = fast or st == PlayerMoves.State.SKID or st == PlayerMoves.State.WALL_SLIDE
+	_dust.position = Vector3(0.0, 0.05 if st != PlayerMoves.State.WALL_SLIDE else height() * 0.6, 0.0)
+
 	_model.visible = invuln <= 0.0 or int(invuln * 15.0) % 2 == 0
+	_play_anim(st)
+
+
+func _play_anim(st: int) -> void:
 	if _ap == null:
 		return
 	var key := "Idle"
-	if ground_pounding:
-		key = "Duck"
-	elif not is_on_floor():
-		key = "Jump_Idle"
-	elif absf(velocity.x) > Tuning.WALK_SPEED + 0.5:
-		key = "Run"
-	elif absf(velocity.x) > 0.2:
-		key = "Walk"
+	var speed := 1.0
+	match st:
+		PlayerMoves.State.CROUCH, PlayerMoves.State.GROUND_POUND, PlayerMoves.State.GP_LAND:
+			key = "Duck"
+		PlayerMoves.State.SKID:
+			key = "Jump_Land"
+		PlayerMoves.State.WALL_SLIDE:
+			key = "Jump_Idle"
+		_:
+			var vx := absf(velocity.x)
+			if not is_on_floor():
+				key = "Jump_Idle"
+			elif vx > Tuning.WALK_SPEED + 0.5:
+				key = "Run"
+				speed = clampf(vx / Tuning.RUN_SPEED * 1.4, 0.9, 1.6)
+			elif vx > 0.2:
+				key = "Walk"
+				speed = clampf(vx / Tuning.WALK_SPEED * 1.3, 0.6, 1.6)
 	var n: StringName = _anims.get(key, &"")
 	if n != &"" and _ap.current_animation != n:
-		_ap.play(n, 0.1)
+		_ap.play(n, 0.08)
+	_ap.speed_scale = speed
+
+
+func _make_dust() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.amount = 12
+	p.lifetime = 0.35
+	p.one_shot = false
+	p.emitting = false
+	p.explosiveness = 0.0
+	p.local_coords = false
+	p.direction = Vector3(0, 1, 0)
+	p.spread = 60.0
+	p.initial_velocity_min = 0.8
+	p.initial_velocity_max = 1.8
+	p.gravity = Vector3(0, -2, 0)
+	p.scale_amount_min = 0.12
+	p.scale_amount_max = 0.22
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.5
+	mesh.height = 1.0
+	mesh.radial_segments = 8
+	mesh.rings = 4
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1, 1, 1, 0.8)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material = mat
+	p.mesh = mesh
+	return p
 
 
 ## 2P用: 色相をずらして赤系にする

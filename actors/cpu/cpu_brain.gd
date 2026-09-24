@@ -17,7 +17,8 @@ var _stuck_origin := Vector3.ZERO
 var _escape := 0.0
 var _escape_dir := 1.0
 var _rng := RandomNumberGenerator.new()
-var _air_side := 0.0        ## デバッグ用: 直近の位置と判断
+var _air_side := 0.0
+var _was_down := false
 
 
 func _init(p_me: Player, p_opp: Player, p_game: Node, seed_value := 0) -> void:
@@ -102,7 +103,9 @@ func think(dt: float) -> PlayerInput:
 		var ody := me.bottom() - opp.top()
 		if odx < 0.5 and ody > 0.8 and ody < 5.0:
 			down = true
-	return PlayerInput.make(move, true, jump_pressed, _hold > 0.0, down)
+	var down_pressed := down and not _was_down
+	_was_down = down
+	return PlayerInput.make(move, true, jump_pressed, _hold > 0.0, down, down_pressed)
 
 
 ## 目標に近く、今の位置から1回のジャンプで届く足場
