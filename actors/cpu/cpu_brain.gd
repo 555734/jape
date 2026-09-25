@@ -5,6 +5,7 @@ extends RefCounted
 
 const REACH_UP := 3.3        ## 1回のジャンプで確実に届く高さ(マス)。助走ジャンプ3.8マスより少し低く
 const STUCK_TIME := 1.2      ## この秒数ほぼ動かなければ「詰まった」とみなす
+const NO_PROGRESS_TIME := 4.0 ## この秒数、目標に近づけなければ「同じ所を回っている」とみなす(足場の下で跳ね続けるなど)
 
 var me: Simulation.SimPlayer
 var opp: Simulation.SimPlayer
@@ -19,6 +20,9 @@ var _escape_dir := 1.0
 var _rng := RandomNumberGenerator.new()
 var _air_side := 0.0
 var _was_down := false
+var _best_dist := INF
+var _progress_timer := 0.0
+var _last_target := Vector3.INF
 
 
 func _init(p_game: Simulation, index: int, seed_value := 0) -> void:
@@ -77,6 +81,22 @@ func think(dt: float) -> PlayerInput:
 			_escape_dir = -move if move != 0.0 else (1.0 if _rng.randf() < 0.5 else -1.0)
 		_stuck_timer = 0.0
 		_stuck_origin = me.position
+	# 回り続け対策: 目標に近づけないまま時間がたったら、しばらく逆へ走って別の道から試す
+	if _last_target == Vector3.INF or target.distance_to(_last_target) > 1.0:
+		_last_target = target
+		_best_dist = INF
+		_progress_timer = 0.0
+	var dist := Vector2(stage.delta_x(me.position.x, target.x), target.y - me.position.y).length()
+	if dist < _best_dist - 0.5:
+		_best_dist = dist
+		_progress_timer = 0.0
+	else:
+		_progress_timer += dt
+		if _progress_timer >= NO_PROGRESS_TIME and _escape <= 0.0:
+			_escape = 1.2
+			_escape_dir = -signf(dx) if dx != 0.0 else (1.0 if _rng.randf() < 0.5 else -1.0)
+			_progress_timer = 0.0
+			_best_dist = INF
 	if _escape > 0.0:
 		_escape -= dt
 		move = _escape_dir

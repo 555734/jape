@@ -32,10 +32,10 @@ jobs:
         run: godot --headless --path . --fixed-fps 60 --disable-vsync -- --soak=600 --seed=7 | grep -E "SOAK"; test ${PIPESTATUS[0]} -eq 0
       - name: 通信対戦の自動試合(2つのプロセスをUDPでつなぎ、遅延・ロスありで最後まで同期がずれないこと)
         run: |
-          godot --headless --path . -- --host=24680 --sim --net-lag=40 --net-jitter=20 --net-loss=0.03 > host.log 2>&1 &
+          timeout 900 godot --headless --path . -- --host=24680 --sim --net-lag=40 --net-jitter=20 --net-loss=0.03 > host.log 2>&1 &
           sleep 2
           join_status=0
-          godot --headless --path . -- --join=127.0.0.1:24680 --sim --net-lag=40 --net-jitter=20 --net-loss=0.03 > join.log 2>&1 || join_status=$?
+          timeout 900 godot --headless --path . -- --join=127.0.0.1:24680 --sim --net-lag=40 --net-jitter=20 --net-loss=0.03 > join.log 2>&1 || join_status=$?
           host_status=0
           wait %1 || host_status=$?
           grep -E "NET|SIM" host.log join.log
