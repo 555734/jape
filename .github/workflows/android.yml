@@ -91,6 +91,21 @@ jobs:
           name: jape-android-${{ github.sha }}
           path: build/android/jape.apk
           retention-days: 14
+      - name: Play 向け AAB の生成を使い捨て鍵で検証
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ runner.temp }}/verify-upload.jks
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: verify
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: verify1234
+        run: |
+          keytool -genkeypair -noprompt -keystore "$GODOT_ANDROID_KEYSTORE_RELEASE_PATH" \
+            -storepass "$GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD" \
+            -keypass "$GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD" \
+            -alias "$GODOT_ANDROID_KEYSTORE_RELEASE_USER" -keyalg RSA -keysize 2048 \
+            -validity 1 -dname "CN=CI Verification,O=Jape,C=JP"
+          godot --headless --path . --export-release "Android Play" build/android/verify.aab
+          test -s build/android/verify.aab
+          unzip -l build/android/verify.aab | grep -E "libEOSSDK.so|libeosg"
+          jarsigner -verify build/android/verify.aab
       - name: Play 内部テスト用の認証情報を確認
         id: play_ready
         if: github.event_name == 'workflow_dispatch'
