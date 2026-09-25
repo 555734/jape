@@ -6,4 +6,4 @@ Prompt: "Create a polished original cheerful meadow world background only, suita
 
 The blocks, soil, pipes, coins, star, growth pickup and walking enemy are original procedural meshes in `game/stage_art.gd`.
 
-The player characters are Blender-modeled Mario and Luigi recreations based on the supplied DS gameplay screenshots. Editable `.blend` sources are in `assets_src/characters/`; exported `.glb` files are in `assets/characters/`. The deterministic build script is `tools/blender/make_brothers.py`, and `actors/player/hero_avatar.gd` applies poses to the imported head and limb nodes. The models are independently made recreations, not extracted game files. The four-character preview is `tools/preview/hero_avatar_preview.gd`.
+The player characters use PolyOne Studio's rigged Stick Man, recolored white and animated in `actors/player/hero_avatar.gd`. The supplied FBX, exported GLB, conversion script, and required attribution are in `assets/characters/` and `tools/blender/convert_stickman.py`. The four-character preview is `tools/preview/hero_avatar_preview.gd`. Earlier prototype models remain in `assets/characters/` but are not used by the game.

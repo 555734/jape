@@ -1,17 +1,16 @@
 class_name HeroAvatar
 extends Node3D
-## Blender 製 Mario / Luigi のモデルと、ゲーム状態に合わせた手足のポーズ。
+## PolyOne Studio のリグ付きメッシュ。全身白のシルエットを骨で動かす。
 
-const MODELS := [
-	preload("res://assets/characters/mario.glb"),
-	preload("res://assets/characters/luigi.glb"),
-]
+const MODEL: PackedScene = preload("res://assets/characters/white_stick_man.glb")
 
 var player_index: int
-var _arms: Array[Node3D] = []
-var _legs: Array[Node3D] = []
-var _head: Node3D
-var _torso: Node3D
+var _skeleton: Skeleton3D
+var _mesh: MeshInstance3D
+var _rig: Node3D
+var _bones: Dictionary = {}
+var _axis_z: Dictionary = {}
+var _base_rotation: Dictionary = {}
 var _cycle := 0.0
 
 
@@ -20,60 +19,90 @@ func _init(index: int = 0) -> void:
 
 
 func _ready() -> void:
-	var model: Node3D = MODELS[clampi(player_index, 0, 1)].instantiate()
-	add_child(model)
-	_head = model.find_child("Head", true, false) as Node3D
-	_torso = model.find_child("Torso", true, false) as Node3D
-	_arms = [
-		model.find_child("ArmLeft", true, false) as Node3D,
-		model.find_child("ArmRight", true, false) as Node3D,
-	]
-	_legs = [
-		model.find_child("LegLeft", true, false) as Node3D,
-		model.find_child("LegRight", true, false) as Node3D,
-	]
-	assert(_head != null and _torso != null)
-	for limb in _arms + _legs:
-		assert(limb != null)
+	_rig = MODEL.instantiate()
+	add_child(_rig)
+	_skeleton = _rig.find_child("Skeleton3D", true, false) as Skeleton3D
+	_mesh = _rig.find_child("SM_StickMan", true, false) as MeshInstance3D
+	assert(_skeleton != null and _mesh != null)
+	_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	# 色は書き出した GLB にも焼き込み、ここでも再指定して全端末で同じ白にする。
+	var white := StandardMaterial3D.new()
+	white.albedo_color = Color(0.96, 0.96, 0.96)
+	white.roughness = 0.72
+	_mesh.material_override = white
+	var rig_basis := global_transform.basis.inverse() * _skeleton.global_transform.basis
+	var scene_z_in_skeleton := rig_basis.inverse() * Vector3.BACK
+	for bone_name in ["LeftArm", "RightArm", "LeftForeArm", "RightForeArm", "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "Spine2", "Head"]:
+		var bone_id := _skeleton.find_bone(bone_name)
+		assert(bone_id >= 0, "Missing stickman bone: " + bone_name)
+		_bones[bone_name] = bone_id
+		_axis_z[bone_name] = (_skeleton.get_bone_global_rest(bone_id).basis.inverse() * scene_z_in_skeleton).normalized()
+		_base_rotation[bone_name] = _skeleton.get_bone_pose_rotation(bone_id)
+
+
+func _set_z(bone_name: String, degrees: float) -> void:
+	var bone_id: int = _bones[bone_name]
+	_skeleton.set_bone_pose_rotation(bone_id, Quaternion(_axis_z[bone_name], deg_to_rad(degrees)) * _base_rotation[bone_name])
 
 
 func pose(state: int, grounded: bool, speed: float, delta: float) -> void:
-	var running := grounded and absf(speed) > 0.35 and state == PlayerMoves.State.NORMAL
+	if _skeleton == null:
+		return
 	var stride := clampf(absf(speed) / Tuning.RUN_SPEED, 0.0, 1.0)
-	_cycle += delta * (lerpf(8.0, 17.0, stride) if running else 2.0)
+	var running := grounded and absf(speed) > 0.35 and state == PlayerMoves.State.NORMAL
+	_cycle += delta * (lerpf(7.0, 17.0, stride) if running else 2.0)
 	var wave := sin(_cycle)
-	var swing := wave * lerpf(13.0, 38.0, stride) if running else 0.0
-	_legs[0].rotation_degrees.z = swing
-	_legs[1].rotation_degrees.z = -swing
-	_arms[0].rotation_degrees.z = -swing * 0.9 - 7.0
-	_arms[1].rotation_degrees.z = swing * 0.9 + 7.0
-	_torso.position.y = absf(wave) * 0.035 * stride if running else sin(_cycle) * 0.013
-	_head.position.y = _torso.position.y * 0.5
+	var swing := wave * lerpf(10.0, 35.0, stride) if running else 0.0
+	var left_arm := -76.0 - swing * 0.75
+	var right_arm := 76.0 - swing * 0.75
+	var left_leg := swing
+	var right_leg := -swing
+	var left_forearm := -12.0
+	var right_forearm := 12.0
+	var torso := 0.0
+	var head := 0.0
+
 	match state:
 		PlayerMoves.State.SKID:
-			_arms[0].rotation_degrees.z = -35
-			_arms[1].rotation_degrees.z = 35
-			_legs[0].rotation_degrees.z = -22
-			_legs[1].rotation_degrees.z = 22
+			left_arm = -120.0
+			right_arm = 120.0
+			left_leg = -24.0
+			right_leg = 24.0
+			torso = 8.0
 		PlayerMoves.State.CROUCH:
-			_arms[0].rotation_degrees.z = -30
-			_arms[1].rotation_degrees.z = 30
-			_head.position.y -= 0.1
+			left_arm = -48.0
+			right_arm = 48.0
+			left_leg = -25.0
+			right_leg = 25.0
+			torso = 18.0
 		PlayerMoves.State.WALL_SLIDE:
-			_arms[0].rotation_degrees.z = -65
-			_arms[1].rotation_degrees.z = 65
-			_legs[0].rotation_degrees.z = 17
-			_legs[1].rotation_degrees.z = -17
+			left_arm = -18.0
+			right_arm = 18.0
+			left_leg = -18.0
+			right_leg = 18.0
 		PlayerMoves.State.GROUND_POUND:
-			_arms[0].rotation_degrees.z = 30
-			_arms[1].rotation_degrees.z = -30
-			_legs[0].rotation_degrees.z = -18
-			_legs[1].rotation_degrees.z = 18
+			left_arm = -125.0
+			right_arm = 125.0
+			left_leg = -12.0
+			right_leg = 12.0
 		PlayerMoves.State.GP_LAND:
-			_head.position.y -= 0.12
+			torso = 22.0
+			head = -8.0
 		_:
 			if not grounded:
-				_arms[0].rotation_degrees.z = -45
-				_arms[1].rotation_degrees.z = 45
-				_legs[0].rotation_degrees.z = 15
-				_legs[1].rotation_degrees.z = -15
+				left_arm = -120.0
+				right_arm = 120.0
+				left_leg = -16.0
+				right_leg = 16.0
+
+	_set_z("LeftArm", left_arm)
+	_set_z("RightArm", right_arm)
+	_set_z("LeftForeArm", left_forearm)
+	_set_z("RightForeArm", right_forearm)
+	_set_z("LeftUpLeg", left_leg)
+	_set_z("RightUpLeg", right_leg)
+	_set_z("LeftLeg", 12.0 if running and left_leg > 0.0 else 0.0)
+	_set_z("RightLeg", -12.0 if running and right_leg < 0.0 else 0.0)
+	_set_z("Spine2", torso)
+	_set_z("Head", head)
+	_rig.position.y = absf(wave) * 0.025 * stride if running else sin(_cycle) * 0.006
