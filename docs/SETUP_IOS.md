@@ -1,6 +1,6 @@
 # iPhone版(TestFlight)の準備手順 — Windowsだけで行う
 
-GitHub Actions の `ios` ワークフローが使う7つの Secrets を作る手順。Macは不要。
+GitHub Actions の `ios` ワークフローが使う7つの Secrets を作る手順。手元にMacは不要。
 作業するのは Apple Developer Program に登録したアカウントの持ち主。
 
 > ⚠ ここで作る鍵やパスワードはチャットに貼らないこと。GitHubの Secrets にだけ登録する。
@@ -66,8 +66,9 @@ GitHub のリポジトリ → Settings → Secrets and variables → Actions →
 | `ASC_KEY_P8_BASE64` | `key.txt` の中身 |
 
 ## 8. 実行する
-GitHub → Actions →「ios」→「Run workflow」。成功すると10〜30分後に App Store Connect の TestFlight にビルドが表示される。
+GitHub → Actions →「ios」→「Run workflow」で対象ブランチを選んで実行する。署名とアップロードは手動実行時だけ行う。成功後、Appleでの処理が終わると App Store Connect の TestFlight にビルドが表示される。
 TestFlight で iPhone 担当の人をテスターに追加すると、TestFlightアプリからインストールできる。
 
 ## 注意
-- このワークフローは Secrets 登録前は動かせないため、**まだ一度も成功を確認していない**。最初の実行で失敗したら、ログを見て直す。
+- Secrets が無い状態での署名なしビルドは成功済み。署名・TestFlight送信は、Secrets 登録後に初めて検証できる。
+- 2026年の提出要件に合わせ、ワークフローは iOS 26 SDK を含む macOS 26 ランナーを使用する。

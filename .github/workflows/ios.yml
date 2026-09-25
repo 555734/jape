@@ -1,7 +1,7 @@
 name: ios
 
 # push のたびに iOS 版がビルドできるか確かめる(署名なし)。
-# Apple の Secrets(docs/SETUP_IOS.md)がそろっていれば、署名して TestFlight へ送る。
+# Apple の Secrets(docs/SETUP_IOS.md)がそろった手動実行だけ、署名して TestFlight へ送る。
 on:
   push:
   workflow_dispatch:
@@ -11,7 +11,7 @@ env:
 
 jobs:
   ios:
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
       IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
@@ -24,6 +24,11 @@ jobs:
       - name: Apple の Secrets がそろっているか確認
         id: signing
         run: |
+          xcodebuild -version
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           missing=""
           for v in IOS_CERT_P12_BASE64 IOS_CERT_PASSWORD IOS_PROVISION_PROFILE_BASE64 APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64; do
             [ -z "${!v}" ] && missing="$missing $v"

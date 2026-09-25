@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 env:
-  GODOT_VERSION: "4.5"
+  GODOT_VERSION: "4.7.1"
 
 jobs:
   apk:
@@ -50,6 +50,9 @@ jobs:
             keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey \
               -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
+      - name: Play 提出に必要な Android 16 SDK を用意
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.1.0"
       - name: EOSG(通信対戦のプラグイン)を取得
         run: bash tools/eos/fetch_eosg.sh linux android
       - name: EOS の認証情報を GitHub Secrets から入れる(リポジトリには入れない)
@@ -88,3 +91,58 @@ jobs:
           name: jape-android-${{ github.sha }}
           path: build/android/jape.apk
           retention-days: 14
+      - name: Play 内部テスト用の認証情報を確認
+        id: play_ready
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_KEYSTORE_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_ALIAS }}
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+        run: |
+          missing=""
+          for v in ANDROID_UPLOAD_KEYSTORE_BASE64 ANDROID_UPLOAD_KEYSTORE_ALIAS ANDROID_UPLOAD_KEYSTORE_PASSWORD PLAY_SERVICE_ACCOUNT_JSON_BASE64; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Play 内部テストへの送信をスキップします。未登録の Secrets:$missing"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Play 内部テスト用の署名済み AAB を作る
+        if: steps.play_ready.outputs.enabled == 'true'
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_ALIAS }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ runner.temp }}/upload.jks
+        run: |
+          echo "$ANDROID_UPLOAD_KEYSTORE_BASE64" | base64 -d > "$GODOT_ANDROID_KEYSTORE_RELEASE_PATH"
+          chmod 600 "$GODOT_ANDROID_KEYSTORE_RELEASE_PATH"
+          build_number=$((1000 + GITHUB_RUN_NUMBER))
+          sed -i "s/^version\/code=.*/version\/code=$build_number/" export_presets.cfg
+          godot --headless --path . --export-release "Android Play" build/android/jape.aab
+          test -s build/android/jape.aab
+          unzip -l build/android/jape.aab | grep -E "libEOSSDK.so|libeosg"
+          jarsigner -verify build/android/jape.aab
+      - uses: actions/upload-artifact@v4
+        if: steps.play_ready.outputs.enabled == 'true'
+        with:
+          name: jape-play-aab-${{ github.sha }}
+          path: build/android/jape.aab
+          retention-days: 14
+      - uses: actions/setup-python@v5
+        if: steps.play_ready.outputs.enabled == 'true'
+        with:
+          python-version: '3.11'
+      - name: Google Play 内部テストへ送信
+        if: steps.play_ready.outputs.enabled == 'true'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/play-service-account.json
+        run: |
+          echo "$PLAY_SERVICE_ACCOUNT_JSON_BASE64" | base64 -d > "$GOOGLE_APPLICATION_CREDENTIALS"
+          chmod 600 "$GOOGLE_APPLICATION_CREDENTIALS"
+          python -m pip install google-auth requests
+          python tools/store/upload_play_internal.py com.jape.game build/android/jape.aab

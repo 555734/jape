@@ -1,4 +1,6 @@
 .godot/
+__pycache__/
+*.pyc
 *.import
 assets_src/**/tripo/preview/
 build/
