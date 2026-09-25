@@ -24,6 +24,20 @@ func _ready() -> void:
 	bg.color = Color(0.55, 0.78, 0.98)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
+	var credit := Label.new()
+	credit.text = "Character: PolyOne Studio  ·  CC BY 4.0"
+	credit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	credit.add_theme_font_size_override("font_size", 17)
+	credit.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
+	credit.add_theme_color_override("font_outline_color", Color(0.1, 0.2, 0.3, 0.7))
+	credit.add_theme_constant_override("outline_size", 3)
+	credit.anchor_right = 1.0
+	credit.anchor_top = 1.0
+	credit.anchor_bottom = 1.0
+	credit.offset_top = -36.0
+	credit.offset_bottom = -8.0
+	credit.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(credit)
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(center)

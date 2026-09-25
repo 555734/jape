@@ -1,8 +1,7 @@
 class_name Assets
-## キャラクター素材と、ステージ専用に制作した立体アセットの読み込み。
+## ステージ専用に制作した立体アセットの読み込み。
 
 const ROOT := "res://assets/third_party/quaternius_platformer/"
-const CHARACTER := "res://assets/third_party/quaternius_characters/Casual_Male.gltf"
 const GRASS := "art:grass"
 const DIRT := "art:dirt"
 const BRICK := "art:brick"
@@ -15,15 +14,6 @@ const ENEMY := "art:enemy"
 const CLOUD := "Nature/glTF/Cloud_2.gltf"
 const TREE := "Nature/glTF/Tree.gltf"
 const GROW_ITEM := "art:grow"
-
-## プレイヤーの配色(素材の色が暗すぎるため部品名ごとに塗り直す)。[1P, 2P]
-const PLAYER_PALETTE := {
-	"Skin": [Color(0.96, 0.78, 0.62), Color(0.93, 0.74, 0.58)],
-	"Shirt": [Color(0.2, 0.45, 0.95), Color(0.92, 0.25, 0.22)],
-	"Pants": [Color(0.22, 0.24, 0.35), Color(0.25, 0.22, 0.2)],
-	"Belt": [Color(0.35, 0.22, 0.12), Color(0.35, 0.22, 0.12)],
-	"Hair": [Color(0.35, 0.2, 0.1), Color(0.15, 0.1, 0.08)],
-}
 
 static var _cache := {}
 
@@ -94,15 +84,3 @@ static func anim_name(ap: AnimationPlayer, suffix: String) -> StringName:
 		if String(a).ends_with("|" + suffix) or String(a) == suffix:
 			return a
 	return &""
-
-
-## プレイヤーのモデルを塗り分ける(index: 0=1P, 1=2P)
-static func paint_player(n: Node, index: int) -> void:
-	for m in n.find_children("*", "MeshInstance3D", true, false):
-		var mi := m as MeshInstance3D
-		for s in mi.mesh.get_surface_count():
-			var mat := mi.mesh.surface_get_material(s)
-			if mat is BaseMaterial3D and PLAYER_PALETTE.has(mat.resource_name):
-				var dup: BaseMaterial3D = mat.duplicate()
-				dup.albedo_color = PLAYER_PALETTE[mat.resource_name][index]
-				mi.set_surface_override_material(s, dup)
