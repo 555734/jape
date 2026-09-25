@@ -4,8 +4,8 @@ extends Node3D
 ## ここは毎フレームその状態を映して「見た目の手応え」(傾き・宙返り・潰れ・砂ぼこり・アニメ)を付けるだけ。
 
 const BIG_HEIGHT := Simulation.SimPlayer.BIG_HEIGHT
-const SMALL_VISUAL := 1.0   ## 見た目の高さ(原作の構図: 小さいキャラはブロック1個と同じ高さ)
-const BIG_VISUAL := 2.0     ## 見た目の高さ(原作の大きい状態は約2マス)
+const SMALL_VISUAL := 1.4   ## 見た目の高さ。ユーザー提供の原作画像で帽子〜靴が110px、ブロック1個が78px → 約1.4マス
+const BIG_VISUAL := 2.3     ## 大きい状態(当たり判定の比率 1.8/0.9 より少し控えめ)
 
 var index := 0
 var sim: Simulation.SimPlayer
