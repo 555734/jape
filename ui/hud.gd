@@ -12,6 +12,7 @@ var _right: Label
 var _coin: Label
 var _banner: Label
 var _fps: Label
+var _status: Label
 var _bar: ColorRect
 var _dots := {}
 
@@ -22,6 +23,8 @@ func _ready() -> void:
 	_coin = _label(32, HORIZONTAL_ALIGNMENT_CENTER)
 	_banner = _label(72, HORIZONTAL_ALIGNMENT_CENTER)
 	_fps = _label(22, HORIZONTAL_ALIGNMENT_LEFT)
+	_status = _label(22, HORIZONTAL_ALIGNMENT_LEFT)
+	_status.visible = false
 	_left.add_theme_color_override("font_color", P1_COLOR)
 	_right.add_theme_color_override("font_color", P2_COLOR)
 	_bar = ColorRect.new()
@@ -61,12 +64,14 @@ func _layout() -> void:
 	_fps.size = Vector2(160, 30)
 	_banner.position = Vector2(0, vs.y * 0.3)
 	_banner.size = Vector2(vs.x, 200)
+	_status.position = Vector2(20, 70)
+	_status.size = Vector2(vs.x * 0.5, 30)
 
 
-func update(r: MatchRules, xs: Array, star_x: float, width: float) -> void:
+func update(r: MatchRules, xs: Array, star_x: float, width: float, me := 0) -> void:
 	_left.text = "1P  STAR %d/%d  LIFE %s" % [r.stars[0], r.stars_to_win, _lives(r, 0)]
 	_right.text = "2P  STAR %d/%d  LIFE %s" % [r.stars[1], r.stars_to_win, _lives(r, 1)]
-	_coin.text = "COIN %d/8" % r.coins[0]
+	_coin.text = "COIN %d/8" % r.coins[me]   # 自分のコイン
 	_fps.visible = ControlSettings.show_fps
 	_fps.text = "FPS %d" % Engine.get_frames_per_second()
 	var w := _bar.size.x
@@ -83,3 +88,9 @@ func _lives(r: MatchRules, p: int) -> String:
 func show_banner(text: String) -> void:
 	_banner.text = text
 	_banner.visible = text != ""
+
+
+## 通信の状態(ping など)。空なら出さない
+func show_status(text: String) -> void:
+	_status.text = text
+	_status.visible = text != ""

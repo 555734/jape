@@ -1,14 +1,16 @@
 name: ios
 
-# 手動実行のみ。必要な Secrets は docs/SETUP_IOS.md を参照。
+# push のたびに iOS 版がビルドできるか確かめる(署名なし)。
+# Apple の Secrets(docs/SETUP_IOS.md)がそろっていれば、署名して TestFlight へ送る。
 on:
+  push:
   workflow_dispatch:
 
 env:
   GODOT_VERSION: "4.5"
 
 jobs:
-  testflight:
+  ios:
     runs-on: macos-15
     env:
       IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
@@ -19,15 +21,18 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
     steps:
-      - name: Secrets がそろっているか確認
+      - name: Apple の Secrets がそろっているか確認
+        id: signing
         run: |
           missing=""
           for v in IOS_CERT_P12_BASE64 IOS_CERT_PASSWORD IOS_PROVISION_PROFILE_BASE64 APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8_BASE64; do
             [ -z "${!v}" ] && missing="$missing $v"
           done
           if [ -n "$missing" ]; then
-            echo "::error::未登録の Secrets:$missing (docs/SETUP_IOS.md を参照)"
-            exit 1
+            echo "::warning::Apple の Secrets が未登録のため、署名なしのビルド確認だけ行います(TestFlight には送りません):$missing"
+            echo "enabled=false" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=true" >> $GITHUB_OUTPUT
           fi
       - uses: actions/checkout@v4
       - name: Godot とテンプレートを用意
@@ -39,7 +44,19 @@ jobs:
           d="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable"
           mkdir -p "$d"
           unzip -q -j tpl.tpz 'templates/ios.zip' 'templates/version.txt' -d "$d"
+          rm tpl.tpz
+      - name: EOSG(通信対戦のプラグイン)を取得
+        run: bash tools/eos/fetch_eosg.sh macos ios
+      - name: EOS の認証情報を GitHub Secrets から入れる(リポジトリには入れない)
+        env:
+          EOS_PRODUCT_ID: ${{ secrets.EOS_PRODUCT_ID }}
+          EOS_SANDBOX_ID: ${{ secrets.EOS_SANDBOX_ID }}
+          EOS_DEPLOYMENT_ID: ${{ secrets.EOS_DEPLOYMENT_ID }}
+          EOS_CLIENT_ID: ${{ secrets.EOS_CLIENT_ID }}
+          EOS_CLIENT_SECRET: ${{ secrets.EOS_CLIENT_SECRET }}
+        run: bash tools/eos/write_secrets.sh
       - name: 署名用の証明書とプロファイルを入れる
+        if: steps.signing.outputs.enabled == 'true'
         run: |
           KC=$RUNNER_TEMP/build.keychain-db
           security create-keychain -p ci "$KC"
@@ -57,16 +74,32 @@ jobs:
       - name: Xcode プロジェクトを出力
         run: |
           BUILD=$((1000 + GITHUB_RUN_NUMBER))
+          TEAM="${APPLE_TEAM_ID:-ABCDE12345}"   # 署名なしの確認では仮のチームIDで出力する
           sed -i '' \
-            -e "s/^application\/app_store_team_id=.*/application\/app_store_team_id=\"$APPLE_TEAM_ID\"/" \
-            -e "s/^application\/provisioning_profile_uuid_release=.*/application\/provisioning_profile_uuid_release=\"$PROFILE_UUID\"/" \
+            -e "s/^application\/app_store_team_id=.*/application\/app_store_team_id=\"$TEAM\"/" \
+            -e "s/^application\/provisioning_profile_uuid_release=.*/application\/provisioning_profile_uuid_release=\"${PROFILE_UUID:-}\"/" \
             -e "s/^application\/version=.*/application\/version=\"$BUILD\"/" \
             export_presets.cfg
           "$GODOT" --headless --path . --import
           mkdir -p build/ios
           "$GODOT" --headless --path . --export-release "iOS" build/ios/jape.ipa
           ls build/ios
+          # EOS のフレームワークが Xcode プロジェクトに入ったか確かめる
+          grep -c "EOSSDK" build/ios/jape.xcodeproj/project.pbxproj
+      - name: ビルドできるか確認(署名なし)
+        if: steps.signing.outputs.enabled != 'true'
+        run: |
+          cd build/ios
+          xcodebuild -project jape.xcodeproj -scheme jape -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath $RUNNER_TEMP/dd \
+            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO | tail -30
+          test ${PIPESTATUS[0]} -eq 0
+          # EOS SDK(動的フレームワーク)がアプリに同梱されていないと、起動した瞬間に落ちる
+          app=$(find $RUNNER_TEMP/dd -name "*.app" -type d | head -1)
+          ls "$app/Frameworks"
+          test -d "$app/Frameworks/EOSSDK.framework"
       - name: アーカイブと IPA 作成
+        if: steps.signing.outputs.enabled == 'true'
         run: |
           cd build/ios
           xcodebuild -project jape.xcodeproj -scheme jape -configuration Release \
@@ -83,10 +116,13 @@ jobs:
             <key>provisioningProfiles</key><dict><key>com.jape.game</key><string>$PROFILE_UUID</string></dict>
           </dict></plist>
           EOT
+          ls "$RUNNER_TEMP/jape.xcarchive/Products/Applications/"*.app/Frameworks
+          test -d "$(ls -d $RUNNER_TEMP/jape.xcarchive/Products/Applications/*.app)/Frameworks/EOSSDK.framework"
           xcodebuild -exportArchive -archivePath $RUNNER_TEMP/jape.xcarchive \
             -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist -exportPath $RUNNER_TEMP/ipa
           ls $RUNNER_TEMP/ipa
       - name: TestFlight へアップロード
+        if: steps.signing.outputs.enabled == 'true'
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$ASC_KEY_P8_BASE64" | base64 -d > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8

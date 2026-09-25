@@ -26,6 +26,28 @@ var _last_jump_stage := -1   ## 直前のジャンプの段(着地まで保持)
 var events: Array[String] = []
 
 
+## 通信対戦の巻き戻し用: 状態をまるごと配列にする / 配列から戻す
+func snapshot() -> Array:
+	return [vel.x, vel.y, state, facing, big, jump_stage, land_timer, flipping, wall_lock, _gp_timer,
+		_was_on_floor, _last_jump_stage, run_time]
+
+
+func restore(a: Array) -> void:
+	vel = Vector2(a[0], a[1])
+	state = a[2]
+	facing = a[3]
+	big = a[4]
+	jump_stage = a[5]
+	land_timer = a[6]
+	flipping = a[7]
+	wall_lock = a[8]
+	_gp_timer = a[9]
+	_was_on_floor = a[10]
+	_last_jump_stage = a[11]
+	run_time = a[12]
+	events.clear()
+
+
 ## on_floor: 接地しているか / wall: 押し付けている壁の向き(-1=左, 1=右, 0=なし)
 func step(on_floor: bool, wall: int, input: PlayerInput, dt: float) -> Vector2:
 	events.clear()
@@ -141,7 +163,9 @@ func _jump() -> void:
 		2:
 			h = Tuning.JUMP3_HEIGHT
 		_:
-			h = lerpf(Tuning.STAND_JUMP_HEIGHT, Tuning.RUN_JUMP_HEIGHT, clampf(speed / Tuning.RUN_SPEED, 0.0, 1.0))
+			# lerpf は端末によって計算結果の最後の桁が変わりうる(積和の融合)ため、四則演算で書く
+			var t := clampf(speed / Tuning.RUN_SPEED, 0.0, 1.0)
+			h = Tuning.STAND_JUMP_HEIGHT + (Tuning.RUN_JUMP_HEIGHT - Tuning.STAND_JUMP_HEIGHT) * t
 	vel.y = Tuning.velocity_for_height(h)
 	# 2段目・3段目は横の勢いも上乗せして、高さだけでなく速さでも差を出す
 	if next == 1:

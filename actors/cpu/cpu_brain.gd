@@ -3,12 +3,12 @@ extends RefCounted
 ## CPUの操作。目標を決めて、そこへ向かう入力を毎フレーム作る。
 ## 目標の優先順位: ビッグスター > 落ちたスター > スターを持った相手 > アイテム > コイン > 相手
 
-const REACH_UP := 4.2        ## 1回のジャンプで確実に届く高さ(マス)
+const REACH_UP := 3.3        ## 1回のジャンプで確実に届く高さ(マス)。助走ジャンプ3.8マスより少し低く
 const STUCK_TIME := 1.2      ## この秒数ほぼ動かなければ「詰まった」とみなす
 
-var me: Player
-var opp: Player
-var game: Node               ## MatchGame
+var me: Simulation.SimPlayer
+var opp: Simulation.SimPlayer
+var game: Simulation
 var target := Vector3.ZERO
 
 var _hold := 0.0
@@ -21,10 +21,10 @@ var _air_side := 0.0
 var _was_down := false
 
 
-func _init(p_me: Player, p_opp: Player, p_game: Node, seed_value := 0) -> void:
-	me = p_me
-	opp = p_opp
+func _init(p_game: Simulation, index: int, seed_value := 0) -> void:
 	game = p_game
+	me = game.players[index]
+	opp = game.players[1 - index]
 	if seed_value != 0:
 		_rng.seed = seed_value
 
@@ -47,7 +47,7 @@ func think(dt: float) -> PlayerInput:
 		move = signf(dx)
 	# 目標が上にあり、頭上が足場でふさがっていたら、まず足場の端まで移動する
 	var blocked := false
-	if dy > 0.8 and me.is_on_floor() and _ceiling(stage, 0.0):
+	if dy > 0.8 and absf(dx) < 3.0 and me.is_on_floor() and _ceiling(stage, 0.0):   # 真上に近い目標のときだけ(遠い目標なら先へ進めばよい)
 		var side := _nearest_open_side(stage)
 		if side != 0.0:
 			move = side
@@ -109,7 +109,7 @@ func think(dt: float) -> PlayerInput:
 
 
 ## 目標に近く、今の位置から1回のジャンプで届く足場
-func _pick_ledge(stage: Grassland) -> Vector3:
+func _pick_ledge(stage: StageMap) -> Vector3:
 	var best := Vector3.INF
 	var best_score := INF
 	for l in stage.ledges:
@@ -125,7 +125,7 @@ func _pick_ledge(stage: Grassland) -> Vector3:
 
 
 ## 横に offset マスずれた位置の頭上3マス以内に足場があれば true
-func _ceiling(stage: Grassland, offset: float) -> bool:
+func _ceiling(stage: StageMap, offset: float) -> bool:
 	var x := int(floor(me.position.x + offset))
 	var head := int(floor(me.top() + 0.05))
 	for y in range(head, head + 3):
@@ -135,7 +135,7 @@ func _ceiling(stage: Grassland, offset: float) -> bool:
 
 
 ## 頭上が空いている一番近い方向(-1 / 1)。見つからなければ 0
-func _nearest_open_side(stage: Grassland) -> float:
+func _nearest_open_side(stage: StageMap) -> float:
 	for d in range(1, 9):
 		for s in [-1.0, 1.0]:
 			if not _ceiling(stage, s * d):
@@ -144,7 +144,7 @@ func _nearest_open_side(stage: Grassland) -> float:
 
 
 ## 真下に足場がある一番近い方向(-1 / 1)。今進んでいる向きを優先する。見つからなければ 0
-func _nearest_floor_side(stage: Grassland) -> float:
+func _nearest_floor_side(stage: StageMap) -> float:
 	var first := signf(me.velocity.x) if me.velocity.x != 0.0 else 1.0
 	for s in [first, -first]:
 		for d in range(1, 5):
@@ -154,8 +154,8 @@ func _nearest_floor_side(stage: Grassland) -> float:
 
 
 ## 進行方向の近くに、同じ高さの敵がいれば true
-func _enemy_ahead(stage: Grassland, dir: float) -> bool:
-	for e in stage.enemies:
+func _enemy_ahead(stage: StageMap, dir: float) -> bool:
+	for e in game.enemies:
 		if not e.is_alive():
 			continue
 		var edx := stage.delta_x(me.position.x, e.position.x)
@@ -165,7 +165,7 @@ func _enemy_ahead(stage: Grassland, dir: float) -> bool:
 
 
 ## 進行方向のすぐ前の列に足場が無ければ true(穴の手前でジャンプ)
-func _gap_ahead(stage: Grassland, dir: float) -> bool:
+func _gap_ahead(stage: StageMap, dir: float) -> bool:
 	var fy := int(floor(me.position.y + 0.05)) - 1
 	var fx := int(floor(me.position.x + dir * 0.9))
 	return not stage.is_solid(fx, fy) and not stage.is_solid(fx, fy - 1)

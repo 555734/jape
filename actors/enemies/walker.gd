@@ -1,28 +1,14 @@
 class_name Walker
-extends CharacterBody3D
-## 歩くだけの敵。壁か足場の端で向きを変える。踏まれると倒れる。
+extends Node3D
+## 歩く敵の見た目。動きと当たり判定は Simulation.SimWalker が持ち、ここは毎フレームそれを映すだけ。
 
-const SPEED := 1.5         ## マス/秒【決定・調整】
-const SIZE := 0.9
-
-var stage: Grassland
-var dir := -1.0
-var dead := false
+var sim: Simulation.SimWalker
 
 var _model: Node3D
-var _dead_timer := 0.0
 
 
 func _ready() -> void:
-	collision_layer = 4
-	collision_mask = 1
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(0.8, SIZE, 0.8)
-	shape.shape = box
-	shape.position.y = SIZE * 0.5
-	add_child(shape)
-	_model = Assets.spawn(Assets.ENEMY, SIZE)
+	_model = Assets.spawn(Assets.ENEMY, Simulation.SimWalker.SIZE)
 	add_child(_model)
 	var ap := Assets.find_anim_player(_model)
 	if ap:
@@ -32,41 +18,14 @@ func _ready() -> void:
 			ap.play(a)
 
 
-func _physics_process(delta: float) -> void:
-	if dead:
-		_dead_timer -= delta
-		if _dead_timer <= 0.0:
-			visible = false
-		return
-	velocity.x = dir * SPEED
-	velocity.y = maxf(velocity.y - Tuning.GRAVITY_DOWN * delta, -Tuning.MAX_FALL)
-	if is_on_floor():
-		velocity.y = 0.0
-	move_and_slide()
-	position.z = 0.0
-	position.x = stage.wrap_x(position.x)
-	var ahead_x := int(floor(position.x + dir * 0.55))
-	var foot_y := int(floor(position.y + 0.05))
-	if is_on_wall() or (is_on_floor() and not stage.is_solid(ahead_x, foot_y - 1)):
-		dir = -dir
-	_model.rotation_degrees.y = 90.0 * dir
-	if position.y < -8.0:
-		dead = true
-		visible = false
+func sync() -> void:
+	visible = sim.is_shown()
+	position = Vector3(sim.x, sim.y, 0.0)
+	_model.rotation_degrees.y = 90.0 * sim.dir
+	# 踏まれたら縦横同じ倍率で縮める(骨で動くモデルを平たく潰すと一部のGPUで壊れるため)
+	_model.scale = Vector3.ONE * (0.6 if sim.dead else 1.0)
 
 
-## 左右ループの見た目用: 本体(当たり判定)は動かさず、見た目だけ横にずらす
+## 左右ループの見た目用: 本体の位置は動かさず、見た目だけ横にずらす
 func set_view_shift(dx: float) -> void:
 	_model.position.x = dx
-
-
-## 踏まれた
-func squash() -> void:
-	dead = true
-	_dead_timer = 0.4
-	collision_layer = 0
-	_model.scale = Vector3.ONE * 0.6   # 縦横同じ倍率で縮める(骨で動くモデルを平たく潰すと一部のGPUで壊れるため)
-
-
-func is_alive() -> bool:
-	return not dead

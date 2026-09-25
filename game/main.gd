@@ -1,6 +1,6 @@
 extends Node3D
-## 対戦の本体。ステージ・2人・ルール・画面表示をまとめ、キャラ同士や拾い物の当たりを判定する。
-## 判定の結果(スターの増減・残機・勝敗)は MatchRules に任せる。
+## 対戦の画面。中身(ルール・2人・当たり判定・ラウンドの進行)は Simulation が持ち、
+## ここは毎フレーム入力を集めて Simulation を1フレーム進め、その状態をステージ・キャラ・HUD・カメラに映す。
 ##
 ## 開発用の起動オプション(godot ... -- の後に付ける):
 ##   --cpu-both        1Pも CPU にする(自動で試合が進む)
@@ -16,15 +16,19 @@ const CAM_TAU_FALL := 0.05      ## 落下中・画面端に近いときの縦の
 const CAM_BAND_LO := 1.0        ## 足元が画面下からこのマス数より下に来たら追う
 const CAM_BAND_HI := 2.0        ## 頭が画面上からこのマス数より上に来たら追う
 const FOV := 30.0
-const ROUND_END_WAIT := 3.0
-const MATCH_END_WAIT := 5.0
 const SIM_LIMIT := 900.0        ## --sim の上限(秒)
 const SIM_STUCK := 30.0         ## --sim: この秒数同じ場所なら詰まり
 
-var rules: MatchRules
+var sim: Simulation
+var rules: MatchRules:
+	get:
+		return sim.rules
+var map: StageMap
 var stage: Grassland
 var players: Array[Player] = []
 var brains: Array = [null, null]
+var input_sources: Array[Callable] = [PlayerInput.from_actions, PlayerInput.from_actions]
+var cam_index := 0              ## カメラが追うプレイヤー(自分)
 var camera: Camera3D
 var hud: Hud
 
@@ -33,9 +37,8 @@ var _cam_x := 0.0
 var _cam_y := 0.0
 var _look := 0.0
 var _cam_ready := false
-var _drops := {}                ## drop_id -> DroppedStar
-var _items: Array[Node3D] = []
-var _wait := 0.0
+var _drop_views := {}           ## drop id -> PickupView
+var _item_views := {}           ## item id -> PickupView
 var _args := {}
 var _rng := RandomNumberGenerator.new()
 var _frame := 0
@@ -56,44 +59,8 @@ func _ready() -> void:
 		_rng.seed = seed_value
 	else:
 		_rng.randomize()
-	process_physics_priority = 10   # 2人が動いた後に判定する
 	_setup_input()
 	_setup_environment()
-
-	rules = MatchRules.new(_rng.randi())
-	stage = Grassland.new()
-	if _args.has("practice"):
-		stage.map = Grassland.PRACTICE
-	add_child(stage)
-	rules.star_point_count = stage.star_points.size()
-
-	for i in 2:
-		var p := Player.new()
-		p.index = i
-		p.stage = stage
-		add_child(p)
-		p.fell.connect(_on_fell.bind(i))
-		p.bumped_block.connect(_on_bumped_block.bind(i))
-		p.respawned.connect(func() -> void: rules.spawn_protect(i))
-		players.append(p)
-	if _args.has("demo-moves"):
-		players[0].input_source = _demo_moves_input
-	if _args.has("soak"):
-		for i in 2:
-			var src := _RandomInput.new(_rng.randi())
-			_soak_inputs.append(src)   # Callable だけでは参照が保たれないので持っておく
-			players[i].input_source = src.next
-	for i in 2:
-		if _args.has("demo-moves") and i == 0:
-			continue
-		if i == 1 or _args.has("cpu-both") or _args.has("sim"):
-			brains[i] = CpuBrain.new(players[i], players[1 - i], self, _rng.randi())
-			var b: CpuBrain = brains[i]
-			players[i].input_source = func() -> PlayerInput: return b.think(get_physics_process_delta_time())
-
-	_big_star = Assets.spawn(Assets.STAR, 1.2)
-	_big_star.visible = false
-	add_child(_big_star)
 
 	camera = Camera3D.new()
 	camera.fov = FOV
@@ -101,20 +68,66 @@ func _ready() -> void:
 	camera.current = true
 	hud = Hud.new()
 	add_child(hud)
+	var online := _args.has("host") or _args.has("join") or Online.has_match()
 	if not _args.has("cpu-both") and not _args.has("sim"):
 		if ControlSettings.control_mode == "buttons":
 			add_child(TouchControls.new())
 		else:
 			add_child(StickControls.new())
-		var panel := SettingsPanel.new()
-		panel.report_source = _report
-		add_child(panel)
+		if not online:   # 通信対戦中は一時停止も動きの数値の変更もできないので出さない
+			var panel := SettingsPanel.new()
+			panel.report_source = _report
+			add_child(panel)
 	# 撮影・タッチ再現は一時停止中(設定パネルを開いている間)も動かす
 	var cap := _Capturer.new()
 	cap.game = self
 	cap.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(cap)
-	_start_round()
+
+	if online:
+		_setup_online()
+		if not _args.has("sim"):
+			_add_leave_button()
+		return
+	_build_world(_rng.randi())
+	if _args.has("demo-moves"):
+		input_sources[0] = _demo_moves_input
+	if _args.has("soak"):
+		for i in 2:
+			var src := _RandomInput.new(_rng.randi())
+			_soak_inputs.append(src)   # Callable だけでは参照が保たれないので持っておく
+			input_sources[i] = src.next
+	for i in 2:
+		if _args.has("demo-moves") and i == 0:
+			continue
+		if i == 1 or _args.has("cpu-both") or _args.has("sim"):
+			_attach_cpu(i)
+	_handle_events(sim.events)
+
+
+## 試合の中身(Simulation)と、それを映すステージ・キャラを作る
+func _build_world(match_seed: int) -> void:
+	map = StageMap.new(StageMap.PRACTICE if _args.has("practice") else StageMap.GRASSLAND)
+	sim = Simulation.new(match_seed, map)
+	stage = Grassland.new()
+	stage.map = map
+	stage.sim = sim
+	add_child(stage)
+	for i in 2:
+		var p := Player.new()
+		p.index = i
+		p.sim = sim.players[i]
+		add_child(p)
+		players.append(p)
+	_big_star = Assets.spawn(Assets.STAR, 1.2)
+	_big_star.visible = false
+	add_child(_big_star)
+
+
+func _attach_cpu(i: int) -> void:
+	brains[i] = CpuBrain.new(sim, i, _rng.randi())
+	var b: CpuBrain = brains[i]
+	input_sources[i] = func() -> PlayerInput: return b.think(Simulation.DT)
 
 
 class _Capturer extends Node:
@@ -124,79 +137,214 @@ class _Capturer extends Node:
 		game._capture()
 
 
-func _start_round() -> void:
-	if rules.match_winner >= 0 or rules.round_winner < 0:
-		rules.reset_match()   # 最初の試合、または試合終了後
-	else:
-		rules.next_round()
-	stage.reset()
-	for i in 2:
-		var p := players[i]
-		p.position = stage.spawns[i]
-		p.velocity = Vector3.ZERO
-		p.set_big(false)
-		p.dead = false
-		p.visible = true
-		rules.spawn_protect(i)
-	for id in _drops:
-		(_drops[id] as Node).queue_free()
-	_drops.clear()
-	for it in _items:
-		if is_instance_valid(it):
-			it.queue_free()
-	_items.clear()
-	_big_star.visible = false
-	_cam_ready = false   # ラウンド開始時はカメラを追いかけさせず、その場に切り替える
-	hud.show_banner("")
-	_wait = 0.0
-
-
-func _physics_process(dt: float) -> void:
-	_time += dt
-	if _wait > 0.0:
-		_wait -= dt
-		if _wait <= 0.0:
-			if rules.match_winner >= 0:
-				if _args.has("sim"):
-					_sim_finish()
-					return
-			_start_round()
+func _physics_process(_dt: float) -> void:
+	if _online:
+		_online_tick()
 		return
-
-	if rules.advance(dt):
-		_big_star.position = stage.star_points[rules.star_point]
-		_big_star.visible = true
-		_log("STAR SPAWN point %d at (%.1f, %.1f)" % [rules.star_point + 1, _big_star.position.x, _big_star.position.y])
-	_spawn_new_drops()
+	_time += Simulation.DT
+	var inputs := []
 	for i in 2:
-		players[i].invuln = rules.invuln[i]
-
-	for i in 2:
-		var p := players[i]
-		if p.dead:
-			continue
-		_touch_big_star(i)
-		_touch_drops(i)
-		_touch_coins(i)
-		_touch_items(i)
-		_touch_enemies(i)
-	_touch_players()
-	_update_drops()
-
-	if rules.round_winner >= 0 and _wait <= 0.0:
-		_end_round()
+		inputs.append((input_sources[i].call() as PlayerInput).quantized())
+	sim.step(inputs)
+	_handle_events(sim.events)
 	if _args.has("sim"):
-		_sim_check(dt)
+		_sim_check(Simulation.DT)
 	if _args.has("soak"):
 		_soak_check()
 
 
+# ---- 通信対戦 -----------------------------------------------------------
+## 相手とつなぐのは Online(net/online.gd)。タイトル画面でつながってからこの画面に来るか、
+## 開発用の起動オプションでここから Online に頼む:
+##   --host[=ポート]                 同じPC・同じWi-Fi 用。部屋を作って相手を待つ(1P になる)
+##   --join=アドレス[:ポート]        部屋に入る(2P になる)
+##   --net-lag=ms --net-jitter=ms --net-loss=0〜1   わざと回線を悪くする
+##   --cpu-both と組み合わせると自分側も CPU が操作する(2窓で自動対戦)
+
+const DISCONNECT_TICKS := 180   ## この間(3秒)何も届かなければ切断とみなす
+
+var _online := false
+var _session: RollbackSession
+var _transport: NetTransport
+var _net_state := ""            ## "" / "waiting" / "playing" / "lost" / "desync"
+var _leave_button: Button
+
+
+func _setup_online() -> void:
+	_online = true
+	_net_state = "waiting"
+	if Online.has_match():
+		return
+	if _args.has("host"):
+		var port := int(_args["host"]) if _args["host"] != "" else UdpTransport.DEFAULT_PORT
+		print("NET host port=%d" % port)
+		Online.host_lan(port)
+	elif _args.has("join"):
+		var parts: PackedStringArray = (_args["join"] as String).split(":")
+		var port := int(parts[1]) if parts.size() > 1 else UdpTransport.DEFAULT_PORT
+		print("NET join %s:%d" % [parts[0], port])
+		Online.join_lan(parts[0], port)
+
+
+func _online_tick() -> void:
+	if _session == null:
+		if Online.has_match():
+			_start_online(Online.take_match())
+		elif Online.state == "error":
+			_net_state = "lost"
+		return
+	_time += Simulation.DT
+	var input: PlayerInput = input_sources[_session.local].call()
+	_session.tick(input)
+	_handle_events(_session.events)
+	if _session.desync_frame >= 0 and _net_state == "playing":
+		_net_state = "desync"
+		print("NET DESYNC at frame %d" % _session.desync_frame)
+	if _session.ticks_since_recv > DISCONNECT_TICKS and _net_state == "playing":
+		_net_state = "lost"
+		print("NET LOST")
+		if _args.has("sim"):
+			_sim_finish()
+
+
+func _start_online(m: Dictionary) -> void:
+	var local: int = m.local
+	_build_world(m.seed)
+	ControlSettings.use_default_tuning()   # 両方の端末で同じ動きの数値にする(保存はしない)
+	cam_index = local
+	_transport = m.transport
+	var transport := _transport
+	if _args.has("net-lag") or _args.has("net-loss"):
+		transport = LagTransport.new(_transport, int(_args.get("net-lag", "0")), int(_args.get("net-jitter", "0")),
+			float(_args.get("net-loss", "0")))
+	_session = RollbackSession.new(sim, local, transport, m.delay)
+	if _args.has("cpu-both") or _args.has("sim"):
+		_attach_cpu(local)
+	_net_state = "playing"
+	print("NET start (%s) as %dP seed=%d delay=%d" % [m.kind, local + 1, m.seed, m.delay])
+
+
+## 通信対戦をやめてタイトルへ戻る
+func _leave_online() -> void:
+	Online.leave()
+	get_tree().change_scene_to_file("res://ui/title.tscn")
+
+
+## 右上の「退出」ボタン(通信対戦のときだけ)
+func _add_leave_button() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 10
+	add_child(layer)
+	_leave_button = Button.new()
+	_leave_button.text = " 退出 "
+	_leave_button.add_theme_font_size_override("font_size", 28)
+	_leave_button.pressed.connect(_leave_online)
+	layer.add_child(_leave_button)
+	var place := func() -> void:
+		var vs := get_viewport().get_visible_rect().size
+		_leave_button.position = Vector2(vs.x - 130, 70)
+	get_viewport().size_changed.connect(place)
+	place.call()
+
+
+## 通信の状態(画面の隅に出す)
+func _net_status() -> String:
+	if not _online:
+		return ""
+	match _net_state:
+		"waiting":
+			return Online.status if Online.status != "" else "接続を待っています…"
+		"lost":
+			return "通信が切れました\n「退出」でタイトルへ" if _session != null else Online.status
+		"desync":
+			return "同期がずれました (frame %d)" % _session.desync_frame
+	return "ping %d ms  巻き戻し %d" % [roundi(_session.rtt * 1000.0 / 60.0), _session.rollbacks]
+
+
+## Simulation の出来事を、演出・表示・ログにする
+func _handle_events(events: Array) -> void:
+	for ev in events:
+		match ev[0]:
+			"move":
+				players[ev[1]].on_move_event(ev[2])
+			"round_start":
+				_cam_ready = false   # ラウンド開始時はカメラを追いかけさせず、その場に切り替える
+			"star_spawn":
+				_log("STAR SPAWN point %d at (%.1f, %.1f)" % [ev[1] + 1, sim.star_x, sim.star_y])
+			"star":
+				_log("STAR %dP (1P %d, 2P %d)" % [ev[1] + 1, rules.stars[0], rules.stars[1]])
+			"miss":
+				var why := ""
+				if brains[ev[1]] != null:
+					var b: CpuBrain = brains[ev[1]]
+					why = " target=(%.1f, %.1f)" % [b.target.x, b.target.y]
+				_log("MISS %dP at (%.1f, %.1f)%s" % [ev[1] + 1, ev[2], ev[3], why])
+			"round_end":
+				_sim_rounds += 1
+				print("ROUND %d: %dP wins (1P %d - %d 2P) t=%.1fs" % [
+					_sim_rounds, ev[1] + 1, rules.wins[0], rules.wins[1], _time])
+			"match_over":
+				if _args.has("sim"):
+					_sim_finish(ev[1])
+
+
+## ラウンドの結果の表示。通信対戦では巻き戻しで出来事が取り消されることがあるので、出来事ではなく状態から決める
+func _banner_text() -> String:
+	if sim.wait <= 0 or rules.round_winner < 0:
+		return ""
+	var w := rules.round_winner
+	if rules.match_winner >= 0:
+		return "%dP WINS THE MATCH!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]]
+	return "%dP WIN!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]]
+
+
 func _process(dt: float) -> void:
+	if sim == null:
+		hud.show_banner(_net_status())
+		return
+	for i in 2:
+		players[i].invuln = rules.invuln[i]
+		players[i].sync(dt)
+	stage.sync(dt)
+	_sync_pickups(dt)
+	_big_star.visible = sim.star_visible
+	_big_star.position = Vector3(sim.star_x, sim.star_y, 0.0)
 	_update_camera(dt)
 	_wrap_all()
 	_big_star.rotate_y(dt * 2.0)
-	var star_x := stage.wrap_x(_big_star.position.x) if _big_star.visible else -1.0
-	hud.update(rules, [players[0].position.x, players[1].position.x], star_x, stage.width)
+	var star_x := sim.star_x if sim.star_visible else -1.0
+	hud.update(rules, [sim.players[0].x, sim.players[1].x], star_x, map.width, cam_index)
+	var banner := _banner_text()
+	if _net_state == "lost" or _net_state == "desync":
+		banner = _net_status()
+	hud.show_banner(banner)
+	hud.show_status(_net_status())
+
+
+## 落ちたスター・成長アイテムの見た目を、Simulation の中身に合わせて出し入れする
+func _sync_pickups(dt: float) -> void:
+	_sync_views(_drop_views, sim.drops, dt)
+	_sync_views(_item_views, sim.items, dt)
+	for id in _drop_views:
+		(_drop_views[id] as Pickups.PickupView).show_age(rules.drop_age(id))
+
+
+func _sync_views(views: Dictionary, list: Array, dt: float) -> void:
+	var seen := {}
+	for obj in list:
+		var o: Simulation.SimPickup = obj
+		seen[o.id] = true
+		if not views.has(o.id):
+			var v := Pickups.PickupView.new(o)
+			add_child(v)
+			views[o.id] = v
+		var view: Pickups.PickupView = views[o.id]
+		view.sim = o   # 巻き戻しで作り直された物にもつなぎ直す
+		view.sync(dt)
+	for id in views.keys():
+		if not seen.has(id):
+			(views[id] as Node).queue_free()
+			views.erase(id)
 
 
 ## カメラ。横は途切れずに進み続け(ループの継ぎ目でも飛ばない)、縦は「帯」の中にいる間は動かさない。
@@ -204,7 +352,7 @@ func _process(dt: float) -> void:
 func _update_camera(dt: float) -> void:
 	var view := ControlSettings.view_tiles
 	var dist := (view * 0.5) / tan(deg_to_rad(FOV * 0.5))
-	var p := players[0]
+	var p := sim.players[cam_index]
 	if not _cam_ready:
 		_cam_x = p.position.x
 		_cam_y = p.position.y + view * 0.5 - GROUND_MARGIN
@@ -213,7 +361,7 @@ func _update_camera(dt: float) -> void:
 	# 横: 先読み(進行方向を少し先まで見せる。速いほど先まで)
 	var speed := clampf(absf(p.velocity.x) / Tuning.RUN_SPEED, 0.0, 1.0)
 	_look = move_toward(_look, p.moves.facing * (1.0 + 1.5 * speed), dt * 6.0)
-	var target_x := _cam_x + stage.delta_x(_cam_x, p.position.x) + _look
+	var target_x := _cam_x + map.delta_x(_cam_x, p.position.x) + _look
 	_cam_x = lerpf(_cam_x, target_x, 1.0 - exp(-dt / CAM_TAU_X))
 
 	# 縦: 足元が「画面下から CAM_BAND_LO マス」〜「画面上から CAM_BAND_HI マス」の帯にいる間は動かない
@@ -232,229 +380,22 @@ func _update_camera(dt: float) -> void:
 	elif (bottom + view) - head < CAM_BAND_HI:
 		target_y = head + CAM_BAND_HI - view * 0.5
 		tau = CAM_TAU_FALL
-	target_y = clampf(target_y, view * 0.5 - GROUND_MARGIN, stage.height - view * 0.5 + 1.0)
+	target_y = clampf(target_y, view * 0.5 - GROUND_MARGIN, map.height - view * 0.5 + 1.0)
 	_cam_y = lerpf(_cam_y, target_y, 1.0 - exp(-dt / tau))
 	camera.position = Vector3(_cam_x, _cam_y, dist)
 
 
 ## 左右ループの見た目: 全員をカメラに一番近い周回位置に表示する
 func _wrap_all() -> void:
-	stage.wrap_visuals(_cam_x)
+	stage.wrap_visuals(_cam_x, _cam_y)
 	for p in players:
-		p.set_view_shift(stage.image_x(p.position.x, _cam_x) - p.position.x)
-	for id in _drops:
-		var d: Pickups.DroppedStar = _drops[id]
-		d.set_view_shift(stage.image_x(d.position.x, _cam_x) - d.position.x)
-	for it in _items:
-		if is_instance_valid(it):
-			(it as Pickups.GrowItem).set_view_shift(stage.image_x(it.position.x, _cam_x) - it.position.x)
+		p.set_view_shift(map.image_x(p.position.x, _cam_x) - p.position.x)
+	for views in [_drop_views, _item_views]:
+		for id in views:
+			var v: Pickups.PickupView = views[id]
+			v.set_view_shift(map.image_x(v.position.x, _cam_x) - v.position.x)
 	if _big_star.visible:
-		_big_star.position.x = stage.image_x(_big_star.position.x, _cam_x)
-
-
-# ---- 当たり判定 ---------------------------------------------------------
-
-## 2つの箱(足元中心・幅・高さ)が重なっているか。左右ループを考慮
-func _overlap(a_pos: Vector3, a_w: float, a_h: float, b_pos: Vector3, b_w: float, b_h: float) -> bool:
-	var dx := absf(stage.delta_x(a_pos.x, b_pos.x))
-	if dx > (a_w + b_w) * 0.5:
-		return false
-	return a_pos.y < b_pos.y + b_h and b_pos.y < a_pos.y + a_h
-
-
-func _touch_big_star(i: int) -> void:
-	var p := players[i]
-	if not _big_star.visible:
-		return
-	if _overlap(p.position, Player.WIDTH, p.height(), _big_star.position, 1.0, 1.2):
-		rules.collect_star(i)
-		_log("STAR %dP (1P %d, 2P %d)" % [i + 1, rules.stars[0], rules.stars[1]])
-		_big_star.visible = false
-		stage.reset()   # §4 スターを取るとステージが元に戻る
-
-
-func _touch_drops(i: int) -> void:
-	var p := players[i]
-	for id in _drops.keys():
-		var d: Node3D = _drops[id]
-		if _overlap(p.position, Player.WIDTH, p.height(), d.position, 0.8, 0.8):
-			if rules.pickup_drop(id, i):
-				d.queue_free()
-				_drops.erase(id)
-
-
-func _touch_coins(i: int) -> void:
-	var p := players[i]
-	for c in stage.coins.duplicate():
-		if _overlap(p.position, Player.WIDTH, p.height(), c.position, 0.7, 0.7):
-			stage.coins.erase(c)
-			c.queue_free()
-			_gain_coin(i)
-
-
-func _gain_coin(i: int) -> void:
-	if rules.add_coin(i):
-		var p := players[i]
-		var item := Pickups.GrowItem.new(stage, Vector3(p.position.x, p.position.y + 6.0, 0))
-		add_child(item)
-		_items.append(item)
-
-
-func _touch_items(i: int) -> void:
-	var p := players[i]
-	var alive: Array[Node3D] = []
-	for it in _items:
-		if is_instance_valid(it):
-			alive.append(it)
-	_items = alive
-	for it in _items.duplicate():
-		if _overlap(p.position, Player.WIDTH, p.height(), it.position, 0.8, 0.8):
-			_items.erase(it)
-			it.queue_free()
-			p.set_big(true)
-
-
-func _touch_enemies(i: int) -> void:
-	var p := players[i]
-	for e in stage.enemies:
-		if not e.is_alive():
-			continue
-		if not _overlap(p.position, Player.WIDTH, p.height(), e.position, 0.8, Walker.SIZE):
-			continue
-		if p.velocity.y < 0.0 and p.bottom() > e.position.y + Walker.SIZE * 0.4:
-			e.squash()
-			p.bounce()
-		else:
-			_damage(i)
-
-
-func _touch_players() -> void:
-	var a := players[0]
-	var b := players[1]
-	if a.dead or b.dead:
-		return
-	if not _overlap(a.position, Player.WIDTH, a.height(), b.position, Player.WIDTH, b.height()):
-		return
-	for pair in [[0, 1], [1, 0]]:
-		var top: Player = players[pair[0]]
-		var under: Player = players[pair[1]]
-		if top.velocity.y <= 0.0 and top.bottom() > under.position.y + under.height() * 0.5:
-			if top.ground_pounding:
-				rules.ground_pound(pair[0], pair[1])
-			else:
-				rules.stomp(pair[0], pair[1])
-			top.bounce()
-			return
-	# 横からぶつかった §5
-	if rules.bump():
-		var dir := signf(stage.delta_x(b.position.x, a.position.x))
-		a.knockback(dir if dir != 0.0 else -1.0)
-		b.knockback(-dir if dir != 0.0 else 1.0)
-
-
-## 敵などのダメージ §2 §5: 大きければ小さくなって1個、小さければミス
-func _damage(i: int) -> void:
-	if rules.invuln[i] > 0.0:
-		return
-	var p := players[i]
-	if p.big:
-		rules.hit(i, 1)
-		p.shrink()
-	else:
-		_miss(i)
-
-
-func _on_fell(i: int) -> void:
-	_miss(i)
-
-
-func _miss(i: int) -> void:
-	var p := players[i]
-	if p.dead:
-		return
-	var at := p.position
-	var why := ""
-	if brains[i] != null:
-		var b: CpuBrain = brains[i]
-		why = " target=(%.1f, %.1f)" % [b.target.x, b.target.y]
-	_log("MISS %dP at (%.1f, %.1f)%s" % [i + 1, at.x, at.y, why])
-	rules.miss(i)
-	p.die()
-	_spawn_new_drops(at)
-
-
-func _on_bumped_block(x: int, y: int, i: int) -> void:
-	if stage.bump_block(x, y):
-		_gain_coin(i)
-
-
-# ---- 落としたスター -----------------------------------------------------
-
-func _spawn_new_drops(at := Vector3.INF) -> void:
-	for d in rules.new_drops:
-		var from: Vector3 = players[d.owner].position if at == Vector3.INF else at
-		from.y = maxf(from.y, 1.0)
-		var node := Pickups.DroppedStar.new(d.id, stage, from, _rng)
-		add_child(node)
-		_drops[d.id] = node
-	rules.new_drops.clear()
-
-
-func _update_drops() -> void:
-	for id in _drops.keys():
-		if not rules.drop_exists(id):
-			(_drops[id] as Node).queue_free()
-			_drops.erase(id)
-		else:
-			(_drops[id] as Pickups.DroppedStar).show_age(rules.drop_age(id))
-
-
-# ---- ラウンドの進行 -----------------------------------------------------
-
-func _end_round() -> void:
-	var w := rules.round_winner
-	_sim_rounds += 1
-	if rules.match_winner >= 0:
-		hud.show_banner("%dP WINS THE MATCH!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]])
-		_wait = MATCH_END_WAIT
-	else:
-		hud.show_banner("%dP WIN!\n1P %d - %d 2P" % [w + 1, rules.wins[0], rules.wins[1]])
-		_wait = ROUND_END_WAIT
-	print("ROUND %d: %dP wins (1P %d - %d 2P) t=%.1fs" % [_sim_rounds, w + 1, rules.wins[0], rules.wins[1], _time])
-
-
-## CPUの目標(CpuBrain から呼ばれる)
-func cpu_target(i: int) -> Vector3:
-	var me := players[i]
-	var opp := players[1 - i]
-	if _big_star.visible:
-		return _big_star.position
-	var best := Vector3.INF
-	var best_d := INF
-	for id in _drops:
-		var pos: Vector3 = (_drops[id] as Node3D).position
-		if rules.can_pickup_drop(id, i) and stage.has_floor_below(pos, 12):
-			var d := absf(stage.delta_x(me.position.x, pos.x)) + absf(pos.y - me.position.y)
-			if d < best_d:
-				best_d = d
-				best = pos
-	if best != Vector3.INF:
-		return best
-	if rules.stars[1 - i] > 0 and not opp.dead:
-		return opp.position
-	for it in _items:
-		if is_instance_valid(it) and not me.big:
-			return it.position
-	for c in stage.coins:
-		if not stage.has_floor_below(c.position):
-			continue   # 穴の上のコインはCPUは狙わない
-		var d := absf(stage.delta_x(me.position.x, c.position.x)) + absf(c.position.y - me.position.y) * 2.0
-		if d < best_d:
-			best_d = d
-			best = c.position
-	if best != Vector3.INF:
-		return best
-	return opp.position
+		_big_star.position.x = map.image_x(_big_star.position.x, _cam_x)
 
 
 # ---- 開発用 -------------------------------------------------------------
@@ -492,30 +433,28 @@ func _soak_check() -> void:
 	_soak_frames += 1
 	var view := ControlSettings.view_tiles
 	for i in 2:
-		var p := players[i]
+		var p := sim.players[i]
 		var bad := ""
-		if not (is_finite(p.position.x) and is_finite(p.position.y) and is_finite(p.velocity.x) and is_finite(p.velocity.y)):
+		if not (is_finite(p.x) and is_finite(p.y) and is_finite(p.vx) and is_finite(p.vy)):
 			bad = "位置か速度が数値として壊れた"
-		elif p.position.x < 0.0 or p.position.x >= stage.width or p.position.y > stage.height + 8.0:
+		elif p.x < 0.0 or p.x >= map.width or p.y > map.height + 8.0:
 			bad = "ステージの外"
-		elif not p.dead and not p.visible:
-			bad = "生きているのに見えない"
-		elif not p.dead and rules.invuln[i] <= 0.0 and not p._model.visible:
+		elif not p.dead and rules.invuln[i] <= 0.0 and not players[i].model_visible():
 			bad = "無敵でないのにモデルが非表示"
-		elif i == 0 and not p.dead and _time > 1.0 and _wait <= 0.0:
-			var feet_on_screen := p.position.y - (_cam_y - view * 0.5)
-			if p.position.y > -1.0 and (feet_on_screen < -0.5 or feet_on_screen > view + 0.5):
+		elif i == 0 and not p.dead and _time > 1.0 and sim.wait <= 0:
+			var feet_on_screen := p.y - (_cam_y - view * 0.5)
+			if p.y > -1.0 and (feet_on_screen < -0.5 or feet_on_screen > view + 0.5):
 				bad = "カメラの画面外 (足元が画面下から%.1fマス)" % feet_on_screen
 		if bad != "":
 			_soak_errors += 1
 			if _soak_errors <= 20:
 				print("SOAK NG t=%.2f %dP %s pos=(%.2f, %.2f) vel=(%.2f, %.2f) state=%d" % [
-					_time, i + 1, bad, p.position.x, p.position.y, p.velocity.x, p.velocity.y, p.moves.state])
-		if absf(p.position.x - _soak_prev_x[i]) > stage.width * 0.5:
+					_time, i + 1, bad, p.x, p.y, p.vx, p.vy, p.moves.state])
+		if absf(p.x - _soak_prev_x[i]) > map.width * 0.5:
 			_soak_wraps += 1
 			if i == 0 and _args.has("verbose"):
 				print("WRAP 1P frame=%d" % Engine.get_process_frames())
-		_soak_prev_x[i] = p.position.x
+		_soak_prev_x[i] = p.x
 	if _time >= float(_args.get("soak", "60")):
 		print("SOAK RESULT: %.0fs %d frames, wraps=%d, errors=%d" % [_time, _soak_frames, _soak_wraps, _soak_errors])
 		get_tree().quit(1 if _soak_errors > 0 else 0)
@@ -527,14 +466,15 @@ func _report() -> String:
 	lines.append("renderer=%s gpu=%s / %s os=%s model=%s" % [
 		RenderingServer.get_current_rendering_method(), RenderingServer.get_video_adapter_name(),
 		RenderingServer.get_video_adapter_vendor(), OS.get_name(), OS.get_model_name()])
-	lines.append("fps=%d time=%.1f cam=(%.2f, %.2f)" % [Engine.get_frames_per_second(), _time, _cam_x, _cam_y])
+	lines.append("fps=%d time=%.1f frame=%d cam=(%.2f, %.2f) checksum=%d" % [
+		Engine.get_frames_per_second(), _time, sim.frame, _cam_x, _cam_y, sim.checksum()])
 	for i in 2:
-		var p := players[i]
+		var p := sim.players[i]
 		lines.append("P%d pos=(%.2f, %.2f) vel=(%.2f, %.2f) state=%d big=%s dead=%s visible=%s floor=%s stars=%d lives=%d" % [
-			i + 1, p.position.x, p.position.y, p.velocity.x, p.velocity.y, p.moves.state, str(p.big), str(p.dead),
-			str(p.visible), str(p.is_on_floor()), rules.stars[i], rules.lives[i]])
-	for e in stage.enemies:
-		lines.append("enemy pos=(%.2f, %.2f) alive=%s" % [e.position.x, e.position.y, str(e.is_alive())])
+			i + 1, p.x, p.y, p.vx, p.vy, p.moves.state, str(p.big), str(p.dead),
+			str(players[i].visible), str(p.on_floor), rules.stars[i], rules.lives[i]])
+	for e in sim.enemies:
+		lines.append("enemy pos=(%.2f, %.2f) alive=%s" % [e.x, e.y, str(e.is_alive())])
 	return "\n".join(lines)
 
 
@@ -542,7 +482,7 @@ var _demo := {"phase": 0, "jumps": 0, "was_floor": true, "t": 0}
 
 ## --demo-moves: 右へダッシュ → 3段ジャンプ → 壁すべり → 壁キック → ヒップドロップ を自動で行う
 func _demo_moves_input() -> PlayerInput:
-	var p := players[0]
+	var p := sim.players[0]
 	var d := _demo
 	d.t += 1
 	var on_floor := p.is_on_floor()
@@ -641,8 +581,8 @@ func _log(msg: String) -> void:
 
 func _sim_check(dt: float) -> void:
 	for i in 2:
-		var p := players[i]
-		if p.dead or _wait > 0.0:
+		var p := sim.players[i]
+		if p.dead or sim.wait > 0:
 			_sim_still[i] = 0.0
 			continue
 		if p.position.distance_to(_sim_last[i]) > 1.0:
@@ -652,7 +592,7 @@ func _sim_check(dt: float) -> void:
 			_sim_still[i] += dt
 			if _sim_still[i] >= SIM_STUCK:
 				_sim_stuck += 1
-				print("STUCK: %dP at (%.1f, %.1f) t=%.1fs" % [i + 1, p.position.x, p.position.y, _time])
+				print("STUCK: %dP at (%.1f, %.1f) t=%.1fs" % [i + 1, p.x, p.y, _time])
 				_sim_still[i] = 0.0
 	if _time >= SIM_LIMIT:
 		print("TIMEOUT: match did not finish in %.0fs" % SIM_LIMIT)
@@ -660,9 +600,16 @@ func _sim_check(dt: float) -> void:
 		_sim_finish()
 
 
-func _sim_finish() -> void:
-	print("SIM RESULT: winner=%dP rounds=%d time=%.1fs stuck=%d" % [rules.match_winner + 1, _sim_rounds, _time, _sim_stuck])
-	get_tree().quit(1 if _sim_stuck > 0 or rules.match_winner < 0 else 0)
+func _sim_finish(winner := -1) -> void:
+	print("SIM RESULT: winner=%dP rounds=%d time=%.1fs stuck=%d checksum=%d" % [
+		winner + 1, _sim_rounds, _time, _sim_stuck, sim.checksum()])
+	var bad := _sim_stuck > 0 or winner < 0
+	if _session != null:
+		print("NET RESULT: frame=%d rollbacks=%d (%d frames) stalls=%d waits=%d rtt=%.1fms checks=%d desync=%d" % [
+			sim.frame, _session.rollbacks, _session.rollback_frames, _session.stalls, _session.waits,
+			_session.rtt * 1000.0 / 60.0, _session.checks_compared, _session.desync_frame])
+		bad = bad or _session.desync_frame >= 0
+	get_tree().quit(1 if bad else 0)
 
 
 func _setup_input() -> void:
@@ -702,12 +649,15 @@ func _setup_input() -> void:
 
 func _setup_environment() -> void:
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-50, -25, 0)
+	sun.rotation_degrees = Vector3(-45, -28, -22)
+	sun.shadow_enabled = true
+	sun.light_energy = 0.85
 	add_child(sun)
 	var env := WorldEnvironment.new()
 	env.environment = Environment.new()
 	env.environment.background_mode = Environment.BG_COLOR
 	env.environment.background_color = Color(0.55, 0.78, 0.98)
 	env.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.environment.ambient_light_color = Color(0.75, 0.75, 0.8)
+	env.environment.ambient_light_color = Color(0.68, 0.72, 0.77)
+	env.environment.ambient_light_energy = 0.75
 	add_child(env)

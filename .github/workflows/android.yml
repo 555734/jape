@@ -50,6 +50,26 @@ jobs:
             keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey \
               -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
+      - name: EOSG(通信対戦のプラグイン)を取得
+        run: bash tools/eos/fetch_eosg.sh linux android
+      - name: EOS の認証情報を GitHub Secrets から入れる(リポジトリには入れない)
+        env:
+          EOS_PRODUCT_ID: ${{ secrets.EOS_PRODUCT_ID }}
+          EOS_SANDBOX_ID: ${{ secrets.EOS_SANDBOX_ID }}
+          EOS_DEPLOYMENT_ID: ${{ secrets.EOS_DEPLOYMENT_ID }}
+          EOS_CLIENT_ID: ${{ secrets.EOS_CLIENT_ID }}
+          EOS_CLIENT_SECRET: ${{ secrets.EOS_CLIENT_SECRET }}
+        run: bash tools/eos/write_secrets.sh
+      - name: Android のビルドテンプレート(Gradle)を用意し、EOS SDK を組み込む
+        env:
+          EOS_CLIENT_ID: ${{ secrets.EOS_CLIENT_ID }}
+        run: |
+          d=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p android/build
+          unzip -q "$d/android_source.zip" -d android/build
+          echo "${GODOT_VERSION}.stable" > android/.build_version
+          touch android/build/.gdignore
+          python3 tools/eos/patch_android.py android/build
       - name: 素材の読み込み(import)
         run: godot --headless --path . --import
       - name: APK を作る
@@ -61,6 +81,8 @@ jobs:
           mkdir -p build/android
           godot --headless --path . --export-debug "Android" build/android/jape.apk
           test -s build/android/jape.apk
+          # EOS が組み込まれたか確かめる
+          unzip -l build/android/jape.apk | grep -E "libEOSSDK.so|libeosg" 
       - uses: actions/upload-artifact@v4
         with:
           name: jape-android-${{ github.sha }}

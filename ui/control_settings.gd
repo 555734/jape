@@ -37,21 +37,21 @@ const LABELS := {
 
 ## 調整パネルで変えられる動きの数値(Tuning の変数名)
 const TUNABLE := {
-	"RUN_SPEED": [8.0, 14.0],
-	"RUN_JUMP_HEIGHT": [3.0, 6.5],
-	"STAND_JUMP_HEIGHT": [2.5, 5.5],
+	"RUN_SPEED": [5.0, 14.0],
+	"RUN_JUMP_HEIGHT": [2.5, 6.5],
+	"STAND_JUMP_HEIGHT": [2.0, 5.5],
 	"TRIPLE_WINDOW": [0.05, 0.3],
-	"JUMP2_HEIGHT": [3.5, 8.0],
-	"JUMP3_HEIGHT": [4.0, 9.0],
+	"JUMP2_HEIGHT": [3.0, 8.0],
+	"JUMP3_HEIGHT": [3.5, 9.0],
 	"WALL_SLIDE_SPEED": [1.0, 6.0],
-	"WALL_KICK_SPEED_X": [4.0, 11.0],
-	"WALL_KICK_HEIGHT": [2.5, 6.0],
+	"WALL_KICK_SPEED_X": [3.0, 11.0],
+	"WALL_KICK_HEIGHT": [2.0, 6.0],
 	"SKID_DECEL": [15.0, 60.0],
 	"GP_HOVER": [0.1, 0.5],
-	"GRAVITY_UP": [20.0, 60.0],
-	"GRAVITY_DOWN": [25.0, 80.0],
-	"WALK_SPEED": [3.0, 9.0],
-	"MAX_RUN_SPEED": [9.0, 18.0],
+	"GRAVITY_UP": [20.0, 90.0],
+	"GRAVITY_DOWN": [25.0, 140.0],
+	"WALK_SPEED": [2.0, 9.0],
+	"MAX_RUN_SPEED": [5.0, 18.0],
 	"CREEP_SPEED": [0.3, 3.0],
 }
 var _defaults := {}
@@ -94,9 +94,11 @@ func load_settings() -> void:
 	show_fps = cfg.get_value("controls", "show_fps", show_fps)
 	if cfg.get_value("meta", "version", 0) < 2:
 		view_tiles = 12.0   # 前の版の標準(10)が保存されていても、新しい標準の12にそろえる
-	for key in TUNABLE:
-		if cfg.has_section_key("tuning", key):
-			Tuning.set_value(key, float(cfg.get_value("tuning", key)))
+	# 標準の動きの数値を変えた版より前に保存された調整値は使わない(古い軽い動きに戻ってしまうため)
+	if int(cfg.get_value("tuning", "_version", 0)) == Tuning.VERSION:
+		for key in TUNABLE:
+			if cfg.has_section_key("tuning", key):
+				Tuning.set_value(key, float(cfg.get_value("tuning", key)))
 	changed.emit()
 
 
@@ -111,10 +113,17 @@ func save_settings() -> void:
 	cfg.set_value("controls", "control_mode", control_mode)
 	cfg.set_value("controls", "show_fps", show_fps)
 	cfg.set_value("meta", "version", 2)
+	cfg.set_value("tuning", "_version", Tuning.VERSION)
 	for key in TUNABLE:
 		cfg.set_value("tuning", key, Tuning.get_value(key))
 	cfg.save(PATH)
 	changed.emit()
+
+
+## 通信対戦用: 動きの数値を標準に戻す(両方の端末で同じにするため)。保存はしないので、次に起動すれば元に戻る
+func use_default_tuning() -> void:
+	for key in _defaults:
+		Tuning.set_value(key, _defaults[key])
 
 
 func reset_tuning() -> void:
