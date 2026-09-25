@@ -16,6 +16,7 @@ var jump_stage := 0
 var land_timer := 0.0
 var flipping := false        ## 3段目の宙返り中
 
+var run_time := 0.0          ## ダッシュを続けている秒数
 var wall_lock := 0          ## 壁キック後の入力制限(残りフレーム数)
 var _gp_timer := 0.0
 var _was_on_floor := true
@@ -29,7 +30,7 @@ var events: Array[String] = []
 func step(on_floor: bool, wall: int, input: PlayerInput, dt: float) -> Vector2:
 	events.clear()
 	wall_lock = maxi(0, wall_lock - 1)
-	var dir := signf(input.move_x) if absf(input.move_x) > 0.3 else 0.0
+	var dir := signf(input.move_x) if absf(input.move_x) > 0.1 else 0.0
 
 	if on_floor and not _was_on_floor:
 		_on_land()
@@ -69,6 +70,11 @@ func _ground(dir: float, input: PlayerInput, dt: float) -> void:
 	if land_timer <= 0.0:
 		_last_jump_stage = -1   # 猶予切れ: 次のジャンプは1段目から
 	vel.y = 0.0
+	# ダッシュを続けた時間(最高速まで伸びる)
+	if input.run and absf(vel.x) >= Tuning.RUN_SPEED * 0.95 and state != State.SKID:
+		run_time += dt
+	elif not input.run or absf(vel.x) < Tuning.RUN_SPEED * 0.8:
+		run_time = 0.0
 
 	# しゃがみ(大きい状態のみ)
 	if big and input.down:
@@ -84,7 +90,7 @@ func _ground(dir: float, input: PlayerInput, dt: float) -> void:
 
 
 func _horizontal(dir: float, input: PlayerInput, dt: float, rate_scale: float) -> void:
-	var top := Tuning.RUN_SPEED if input.run else Tuning.WALK_SPEED
+	var top := target_speed(absf(input.move_x), input.run)
 	var accel := (Tuning.RUN_ACCEL if input.run else Tuning.WALK_ACCEL) * rate_scale
 	var on_ground := rate_scale >= 1.0
 	if dir != 0.0:
@@ -111,6 +117,16 @@ func _horizontal(dir: float, input: PlayerInput, dt: float, rate_scale: float) -
 			state = State.NORMAL
 
 
+## 入力の強さ(0〜1)とダッシュから、目指す横の速さを決める。
+## 歩き: 強さ0.25以下=ゆっくり(CREEP)〜強さ1=歩きの最高速。ダッシュ: 続けると最高速まで伸びる
+func target_speed(strength: float, run: bool) -> float:
+	if run:
+		var boost := clampf(run_time / Tuning.RUN_BOOST_TIME, 0.0, 1.0)
+		return lerpf(Tuning.RUN_SPEED, Tuning.MAX_RUN_SPEED, boost)
+	var t := clampf((strength - 0.25) / 0.75, 0.0, 1.0)
+	return lerpf(Tuning.CREEP_SPEED, Tuning.WALK_SPEED, t)
+
+
 func _jump() -> void:
 	var speed := absf(vel.x)
 	var next := 0
@@ -127,6 +143,11 @@ func _jump() -> void:
 		_:
 			h = lerpf(Tuning.STAND_JUMP_HEIGHT, Tuning.RUN_JUMP_HEIGHT, clampf(speed / Tuning.RUN_SPEED, 0.0, 1.0))
 	vel.y = Tuning.velocity_for_height(h)
+	# 2段目・3段目は横の勢いも上乗せして、高さだけでなく速さでも差を出す
+	if next == 1:
+		vel.x = clampf(vel.x * Tuning.JUMP2_SPEED_BOOST, -Tuning.MAX_RUN_SPEED * 1.2, Tuning.MAX_RUN_SPEED * 1.2)
+	elif next == 2:
+		vel.x = clampf(vel.x * Tuning.JUMP3_SPEED_BOOST, -Tuning.MAX_RUN_SPEED * 1.2, Tuning.MAX_RUN_SPEED * 1.2)
 	jump_stage = next
 	_last_jump_stage = next
 	land_timer = 0.0
@@ -220,4 +241,5 @@ func reset() -> void:
 	land_timer = 0.0
 	flipping = false
 	wall_lock = 0
+	run_time = 0.0
 	_was_on_floor = false

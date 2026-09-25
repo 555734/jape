@@ -3,28 +3,33 @@ class_name Tuning
 ## ゲーム内の調整パネルから実機で変えられるよう、定数ではなく変数にしている。
 
 # 歩き・ダッシュ
-static var WALK_SPEED := 5.6          ## 動画実測
-static var RUN_SPEED := 11.3          ## 動画実測。TASVideosの解析(3.0ドット/フレーム)と一致
-static var WALK_ACCEL := 5.6 / 0.4    ## 0.4秒で最高速【決定・調整】
-static var RUN_ACCEL := 11.3 / 0.4
-static var STOP_DECEL := 5.6 / 0.2    ## 0.2秒で停止【決定・調整】
+static var CREEP_SPEED := 1.0         ## スティックを少しだけ倒したときのゆっくり歩き【決定・調整】(ユーザー要望: 速さを細かく)
+static var WALK_SPEED := 6.0          ## 歩きの最高速。動画実測5.6を実機の感想で少し上げた【調整】
+static var RUN_SPEED := 11.3          ## ダッシュ。動画実測。TASVideosの解析(3.0ドット/フレーム)と一致
+static var MAX_RUN_SPEED := 13.0      ## ダッシュを続けると伸びる最高速【決定・調整】(ユーザー要望: 遅すぎる・差を広げたい)
+static var RUN_BOOST_TIME := 1.0      ## 最高速まで伸びるのにかかるダッシュ継続時間【決定・調整】
+static var WALK_ACCEL := 6.0 / 0.25   ## 0.25秒で最高速(0.4秒では動き出しが遅いとの感想)【調整】
+static var RUN_ACCEL := 11.3 / 0.25
+static var STOP_DECEL := 6.0 / 0.2    ## 0.2秒で停止【決定・調整】
 static var SKID_MIN_SPEED := 3.0      ## この速さ以上で逆に入れると切り返し(スキッド)【推測・調整】
 static var SKID_DECEL := 35.0         ## 切り返し中の減速(ダッシュから約0.3秒で止まる)【推測・調整】
 static var AIR_ACCEL_RATE := 0.85     ## 空中の加速は地上の何倍か【推測・調整】
 
 # ジャンプ
-static var GRAVITY_UP := 36.0         ## 動画実測(地面基準): 高さ4.5マスを0.5秒で上昇
-static var GRAVITY_DOWN := 42.0       ## 動画実測(地面基準): 6.8マスを0.57秒で落下
+static var GRAVITY_UP := 30.0         ## 実機の感想(重すぎ・高すぎ)で調整。動画実測は36【調整】
+static var GRAVITY_DOWN := 36.0       ## 実機の感想で調整。動画実測は42【調整】
 static var GRAVITY_CUT := 80.0        ## 上昇中にボタンを離したとき(低いジャンプ)【決定・調整】
 static var MAX_FALL := 24.0           ## 6.8マスの落下(0.57秒)で頭打ちにならない値【決定・調整】
-static var RUN_JUMP_HEIGHT := 4.5     ## 動画実測(地面基準、9.7秒のジャンプ)
-static var STAND_JUMP_HEIGHT := 3.6   ## 【推測・調整】助走ジャンプの8割
+static var RUN_JUMP_HEIGHT := 3.8     ## 実機の感想(高すぎ)で調整。動画実測は4.5【調整】
+static var STAND_JUMP_HEIGHT := 3.2   ## 【調整】
 
 # 3段ジャンプ(原作に存在【Wiki】。数値は【推測・調整】)
 static var TRIPLE_WINDOW := 0.12      ## 着地からこの秒数以内に跳ぶと次の段になる
 static var TRIPLE_MIN_SPEED := 4.5    ## この横速度以上で走っていること
-static var JUMP2_HEIGHT := 5.3        ## 2段目(動画実測: 16秒の着地直後のジャンプ)
-static var JUMP3_HEIGHT := 6.2        ## 3段目(宙返り)【推測・調整】動画に映っていない
+static var JUMP2_HEIGHT := 5.0        ## 2段目。1段目との差を広げた(動画実測は5.3)【調整】
+static var JUMP2_SPEED_BOOST := 1.05  ## 2段目で横の勢いを何倍にするか【決定・調整】
+static var JUMP3_HEIGHT := 6.5        ## 3段目(宙返り)【推測・調整】動画に映っていない
+static var JUMP3_SPEED_BOOST := 1.10  ## 3段目で横の勢いを何倍にするか【決定・調整】
 
 # 壁すべり・壁キック(原作に存在【Wiki】。入力制限16フレームは【TAS】、他は【推測・調整】)
 static var WALL_SLIDE_SPEED := 3.0    ## 壁に張り付いて滑り落ちる速さ
@@ -80,6 +85,10 @@ static func get_value(key: String) -> float:
 			return GRAVITY_DOWN
 		"WALK_SPEED":
 			return WALK_SPEED
+		"MAX_RUN_SPEED":
+			return MAX_RUN_SPEED
+		"CREEP_SPEED":
+			return CREEP_SPEED
 	return 0.0
 
 
@@ -114,3 +123,7 @@ static func set_value(key: String, v: float) -> void:
 			GRAVITY_DOWN = v
 		"WALK_SPEED":
 			WALK_SPEED = v
+		"MAX_RUN_SPEED":
+			MAX_RUN_SPEED = v
+		"CREEP_SPEED":
+			CREEP_SPEED = v

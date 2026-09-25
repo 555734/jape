@@ -7,7 +7,7 @@ extends CharacterBody3D
 const BIG_HEIGHT := 1.8     ## docs/RULES.md §2
 const SMALL_HEIGHT := 0.9
 const WIDTH := 0.8
-const SMALL_VISUAL := 1.15  ## 見た目の高さ(原作動画で頭のてっぺんが地面から約1.2マス)
+const SMALL_VISUAL := 1.0   ## 見た目の高さ(原作の構図: 小さいキャラはブロック1個と同じ高さ)
 const BIG_VISUAL := 2.0     ## 見た目の高さ(原作の大きい状態は約2マス)
 const RESPAWN_TIME := 1.5   ## ミスしてから土管から出てくるまで【決定・調整】
 

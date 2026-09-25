@@ -11,12 +11,15 @@ var opacity := 0.55        ## ボタンの濃さ
 var dpad_x := 0.14         ## 十字キーの横位置(画面幅に対する割合)。ボタンは左右対称
 var pad_y := 0.8          ## 十字キー・ボタンの縦位置
 var vibration := true
-var view_tiles := 10.0     ## 画面に映す縦のマス数(原作は12。スマホで見やすいよう標準は10)
+var view_tiles := 12.0     ## 画面に映す縦のマス数(原作と同じ12)
+var show_fps := true        ## 画面にFPS(1秒間の描画回数)を出す。60未満なら処理落ち
 var control_mode := "stick"  ## "stick"=左スティック+右タップ / "buttons"=DS配置のボタン
 
 ## 調整パネルの表示名(日本語)
 const LABELS := {
-	"WALK_SPEED": "歩きの速さ (マス/秒)",
+	"CREEP_SPEED": "ゆっくり歩きの速さ (マス/秒)",
+	"WALK_SPEED": "歩きの最高速 (マス/秒)",
+	"MAX_RUN_SPEED": "ダッシュを続けたときの最高速",
 	"RUN_SPEED": "ダッシュの速さ (マス/秒)",
 	"RUN_JUMP_HEIGHT": "助走ジャンプの高さ (マス)",
 	"STAND_JUMP_HEIGHT": "立ちジャンプの高さ (マス)",
@@ -47,7 +50,9 @@ const TUNABLE := {
 	"GP_HOVER": [0.1, 0.5],
 	"GRAVITY_UP": [20.0, 60.0],
 	"GRAVITY_DOWN": [25.0, 80.0],
-	"WALK_SPEED": [3.0, 8.0],
+	"WALK_SPEED": [3.0, 9.0],
+	"MAX_RUN_SPEED": [9.0, 18.0],
+	"CREEP_SPEED": [0.3, 3.0],
 }
 var _defaults := {}
 
@@ -86,6 +91,9 @@ func load_settings() -> void:
 	vibration = cfg.get_value("controls", "vibration", vibration)
 	view_tiles = cfg.get_value("controls", "view_tiles", view_tiles)
 	control_mode = cfg.get_value("controls", "control_mode", control_mode)
+	show_fps = cfg.get_value("controls", "show_fps", show_fps)
+	if cfg.get_value("meta", "version", 0) < 2:
+		view_tiles = 12.0   # 前の版の標準(10)が保存されていても、新しい標準の12にそろえる
 	for key in TUNABLE:
 		if cfg.has_section_key("tuning", key):
 			Tuning.set_value(key, float(cfg.get_value("tuning", key)))
@@ -101,6 +109,8 @@ func save_settings() -> void:
 	cfg.set_value("controls", "vibration", vibration)
 	cfg.set_value("controls", "view_tiles", view_tiles)
 	cfg.set_value("controls", "control_mode", control_mode)
+	cfg.set_value("controls", "show_fps", show_fps)
+	cfg.set_value("meta", "version", 2)
 	for key in TUNABLE:
 		cfg.set_value("tuning", key, Tuning.get_value(key))
 	cfg.save(PATH)

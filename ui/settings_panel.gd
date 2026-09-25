@@ -108,6 +108,12 @@ func _build() -> void:
 		ControlSettings.changed.emit())
 	_slider(box, "カメラの寄り(画面の縦のマス数。原作は12)", 7.0, 12.0, ControlSettings.view_tiles, func(v: float) -> void:
 		ControlSettings.view_tiles = v)
+	var fps := CheckButton.new()
+	fps.text = "FPSを表示(60未満なら処理落ち)"
+	fps.add_theme_font_size_override("font_size", 24)
+	fps.button_pressed = ControlSettings.show_fps
+	fps.toggled.connect(func(on: bool) -> void: ControlSettings.show_fps = on)
+	box.add_child(fps)
 	var vib := CheckButton.new()
 	vib.text = "振動"
 	vib.add_theme_font_size_override("font_size", 24)

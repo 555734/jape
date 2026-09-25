@@ -84,12 +84,16 @@ func _refresh() -> void:
 	if not _jump_fingers.is_empty():
 		want["jump"] = true
 
+	# 倒し具合を強さとして渡す: 歩き域(WALK_AT〜RUN_AT)を 0.25〜1 に。ゆっくり〜歩き最高速まで細かく変わる
+	var strength := clampf(0.25 + 0.75 * (absf(v.x) - WALK_AT) / (RUN_AT - WALK_AT), 0.25, 1.0)
 	var buzz := false
 	for a in want:
-		if not _state.has(a):
+		if a == "move_left" or a == "move_right":
+			Input.action_press(a, strength)
+		elif not _state.has(a):
 			Input.action_press(a)
-			if a in ["jump", "run", "move_down"]:
-				buzz = true
+		if not _state.has(a) and a in ["jump", "run", "move_down"]:
+			buzz = true
 	for a in _state.keys():
 		if not want.has(a):
 			Input.action_release(a)

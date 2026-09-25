@@ -9,11 +9,11 @@ extends Node3D
 ##   --seed=N          乱数の種(再現用)
 
 const VIEW_TILES_Y_ORIGINAL := 12.0   ## 原作の画面は縦12マス【動画】
-const GROUND_MARGIN := 3.0      ## 足場を画面下から何マス上に見せるか(タッチ操作の親指と重ならないように)
+const GROUND_MARGIN := 1.5      ## 足場を画面下から何マス上に見せるか(原作の構図に近づける)
 const CAM_TAU_X := 0.08         ## 横の追従の速さ(秒。小さいほど速い)
 const CAM_TAU_Y := 0.18         ## 縦の追従の速さ
 const CAM_TAU_FALL := 0.05      ## 落下中・画面端に近いときの縦の追従
-const CAM_BAND_LO := 2.0        ## 足元が画面下からこのマス数より下に来たら追う
+const CAM_BAND_LO := 1.0        ## 足元が画面下からこのマス数より下に来たら追う
 const CAM_BAND_HI := 2.0        ## 頭が画面上からこのマス数より上に来たら追う
 const FOV := 30.0
 const ROUND_END_WAIT := 3.0

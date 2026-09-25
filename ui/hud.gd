@@ -11,6 +11,7 @@ var _left: Label
 var _right: Label
 var _coin: Label
 var _banner: Label
+var _fps: Label
 var _bar: ColorRect
 var _dots := {}
 
@@ -20,6 +21,7 @@ func _ready() -> void:
 	_right = _label(32, HORIZONTAL_ALIGNMENT_RIGHT)
 	_coin = _label(32, HORIZONTAL_ALIGNMENT_CENTER)
 	_banner = _label(72, HORIZONTAL_ALIGNMENT_CENTER)
+	_fps = _label(22, HORIZONTAL_ALIGNMENT_LEFT)
 	_left.add_theme_color_override("font_color", P1_COLOR)
 	_right.add_theme_color_override("font_color", P2_COLOR)
 	_bar = ColorRect.new()
@@ -55,6 +57,8 @@ func _layout() -> void:
 	_right.size = Vector2(vs.x * 0.4, 40)
 	_coin.position = Vector2(vs.x * 0.3, 26)
 	_coin.size = Vector2(vs.x * 0.4, 40)
+	_fps.position = Vector2(vs.x * 0.5 - 60, 62)
+	_fps.size = Vector2(160, 30)
 	_banner.position = Vector2(0, vs.y * 0.3)
 	_banner.size = Vector2(vs.x, 200)
 
@@ -63,6 +67,8 @@ func update(r: MatchRules, xs: Array, star_x: float, width: float) -> void:
 	_left.text = "1P  STAR %d/%d  LIFE %s" % [r.stars[0], r.stars_to_win, _lives(r, 0)]
 	_right.text = "2P  STAR %d/%d  LIFE %s" % [r.stars[1], r.stars_to_win, _lives(r, 1)]
 	_coin.text = "COIN %d/8" % r.coins[0]
+	_fps.visible = ControlSettings.show_fps
+	_fps.text = "FPS %d" % Engine.get_frames_per_second()
 	var w := _bar.size.x
 	(_dots["p1"] as ColorRect).position = Vector2(xs[0] / width * w - 7, 0)
 	(_dots["p2"] as ColorRect).position = Vector2(xs[1] / width * w - 7, 0)

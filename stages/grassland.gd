@@ -32,7 +32,7 @@ const PRACTICE := [
 	"                                                                  CC            ",
 	"                        2                                         CC    6       ",
 	"                                                4                 CC            ",
-	"                                                                  CC            ",
+	"         B   ??                                                   CC            ",
 	"            1                                               5     CC            ",
 	"  PP                                                              CC        PP  ",
 	"  PP S                                                            CC      T PP  ",
