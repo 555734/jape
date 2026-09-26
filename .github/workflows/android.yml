@@ -106,27 +106,26 @@ jobs:
           test -s build/android/verify.aab
           unzip -l build/android/verify.aab | grep -E "libEOSSDK.so|libeosg"
           jarsigner -verify build/android/verify.aab
-      - name: Play 内部テスト用の認証情報を確認
-        id: play_ready
+      - name: Play 向け署名情報を確認
+        id: signing_ready
         if: github.event_name == 'workflow_dispatch'
         env:
           ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
           ANDROID_UPLOAD_KEYSTORE_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_ALIAS }}
           ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
-          PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
         run: |
           missing=""
-          for v in ANDROID_UPLOAD_KEYSTORE_BASE64 ANDROID_UPLOAD_KEYSTORE_ALIAS ANDROID_UPLOAD_KEYSTORE_PASSWORD PLAY_SERVICE_ACCOUNT_JSON_BASE64; do
+          for v in ANDROID_UPLOAD_KEYSTORE_BASE64 ANDROID_UPLOAD_KEYSTORE_ALIAS ANDROID_UPLOAD_KEYSTORE_PASSWORD; do
             [ -z "${!v}" ] && missing="$missing $v"
           done
           if [ -n "$missing" ]; then
-            echo "::warning::Play 内部テストへの送信をスキップします。未登録の Secrets:$missing"
+            echo "::warning::署名済みAABを作れません。未登録の Secrets:$missing"
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Play 内部テスト用の署名済み AAB を作る
-        if: steps.play_ready.outputs.enabled == 'true'
+        if: steps.signing_ready.outputs.enabled == 'true'
         env:
           ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
           GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_ALIAS }}
@@ -142,11 +141,23 @@ jobs:
           unzip -l build/android/jape.aab | grep -E "libEOSSDK.so|libeosg"
           jarsigner -verify build/android/jape.aab
       - uses: actions/upload-artifact@v4
-        if: steps.play_ready.outputs.enabled == 'true'
+        if: steps.signing_ready.outputs.enabled == 'true'
         with:
           name: jape-play-aab-${{ github.sha }}
           path: build/android/jape.aab
           retention-days: 14
+      - name: Play API 認証情報を確認
+        id: play_ready
+        if: steps.signing_ready.outputs.enabled == 'true'
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+        run: |
+          if [ -n "$PLAY_SERVICE_ACCOUNT_JSON_BASE64" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Play API認証情報が未設定のため、署名済みAABをartifactに保存しました。"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
         if: steps.play_ready.outputs.enabled == 'true'
         with:
