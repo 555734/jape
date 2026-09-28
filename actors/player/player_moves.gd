@@ -21,6 +21,7 @@ var wall_lock := 0          ## 壁キック後の入力制限(残りフレーム
 var _gp_timer := 0.0
 var _was_on_floor := true
 var _last_jump_stage := -1   ## 直前のジャンプの段(着地まで保持)
+var _jump_cut := false       ## 上昇中にジャンプを離した(頂点のふわっを効かせない)
 
 ## 1フレームの出来事(見た目・音用)。step() のたびに作り直す
 var events: Array[String] = []
@@ -29,7 +30,7 @@ var events: Array[String] = []
 ## 通信対戦の巻き戻し用: 状態をまるごと配列にする / 配列から戻す
 func snapshot() -> Array:
 	return [vel.x, vel.y, state, facing, big, jump_stage, land_timer, flipping, wall_lock, _gp_timer,
-		_was_on_floor, _last_jump_stage, run_time]
+		_was_on_floor, _last_jump_stage, run_time, _jump_cut]
 
 
 func restore(a: Array) -> void:
@@ -45,6 +46,7 @@ func restore(a: Array) -> void:
 	_was_on_floor = a[10]
 	_last_jump_stage = a[11]
 	run_time = a[12]
+	_jump_cut = a[13]
 	events.clear()
 
 
@@ -77,6 +79,7 @@ func step(on_floor: bool, wall: int, input: PlayerInput, dt: float) -> Vector2:
 func _on_land() -> void:
 	events.append("land")
 	flipping = false
+	_jump_cut = false
 	if state == State.GROUND_POUND:
 		state = State.GP_LAND
 		_gp_timer = Tuning.GP_LAND_STUN
@@ -92,7 +95,7 @@ func _ground(dir: float, input: PlayerInput, dt: float) -> void:
 	if land_timer <= 0.0:
 		_last_jump_stage = -1   # 猶予切れ: 次のジャンプは1段目から
 	vel.y = 0.0
-	# ダッシュを続けた時間(最高速まで伸びる)
+	# ダッシュを続けた時間(この時間で段4に上がる)
 	if input.run and absf(vel.x) >= Tuning.RUN_SPEED * 0.95 and state != State.SKID:
 		run_time += dt
 	elif not input.run or absf(vel.x) < Tuning.RUN_SPEED * 0.8:
@@ -139,14 +142,44 @@ func _horizontal(dir: float, input: PlayerInput, dt: float, rate_scale: float) -
 			state = State.NORMAL
 
 
-## 入力の強さ(0〜1)とダッシュから、目指す横の速さを決める。
-## 歩き: 強さ0.25以下=ゆっくり(CREEP)〜強さ1=歩きの最高速。ダッシュ: 続けると最高速まで伸びる
+## 入力の強さ(0〜1)とダッシュから、横の速さの段(0〜4)を決める。
+##   段0=止まっている / 段1=ゆっくり歩き / 段2=歩き / 段3=ダッシュ / 段4=ダッシュを続けたとき
+func speed_tier(strength: float, run: bool) -> int:
+	if strength <= 0.1:
+		return 0
+	if run and strength > 0.25:
+		return 4 if run_time >= Tuning.RUN_STEP_TIME else 3
+	return 1 if strength <= 0.5 else 2
+
+
+## 段に応じた速さ。段の途中の値は作らず、加速で段から段へつなぐ
+func tier_speed(tier: int) -> float:
+	match tier:
+		1:
+			return Tuning.CREEP_SPEED
+		2:
+			return Tuning.WALK_SPEED
+		3:
+			return Tuning.RUN_SPEED
+		4:
+			return Tuning.MAX_RUN_SPEED
+	return 0.0
+
+
 func target_speed(strength: float, run: bool) -> float:
-	if run:
-		var boost := clampf(run_time / Tuning.RUN_BOOST_TIME, 0.0, 1.0)
-		return lerpf(Tuning.RUN_SPEED, Tuning.MAX_RUN_SPEED, boost)
-	var t := clampf((strength - 0.25) / 0.75, 0.0, 1.0)
-	return lerpf(Tuning.CREEP_SPEED, Tuning.WALK_SPEED, t)
+	return tier_speed(speed_tier(strength, run))
+
+
+## 今の横の速さがどの段にあたるか(ジャンプの高さを段にそろえるために使う)
+func current_tier() -> int:
+	var speed := absf(vel.x)
+	if speed >= Tuning.MAX_RUN_SPEED - 0.5:
+		return 4
+	if speed >= Tuning.RUN_SPEED - 0.5:
+		return 3
+	if speed >= Tuning.WALK_SPEED - 0.5:
+		return 2
+	return 1
 
 
 func _jump() -> void:
@@ -163,9 +196,8 @@ func _jump() -> void:
 		2:
 			h = Tuning.JUMP3_HEIGHT
 		_:
-			# lerpf は端末によって計算結果の最後の桁が変わりうる(積和の融合)ため、四則演算で書く
-			var t := clampf(speed / Tuning.RUN_SPEED, 0.0, 1.0)
-			h = Tuning.STAND_JUMP_HEIGHT + (Tuning.RUN_JUMP_HEIGHT - Tuning.STAND_JUMP_HEIGHT) * t
+			# 横の段(1〜4)にそろえた高さ。lerpf は端末によって最後の桁が変わりうる(積和の融合)ため使わない
+			h = Tuning.jump_height_for_tier(current_tier())
 	vel.y = Tuning.velocity_for_height(h)
 	# 2段目・3段目は横の勢いも上乗せして、高さだけでなく速さでも差を出す
 	if next == 1:
@@ -174,6 +206,7 @@ func _jump() -> void:
 		vel.x = clampf(vel.x * Tuning.JUMP3_SPEED_BOOST, -Tuning.MAX_RUN_SPEED * 1.2, Tuning.MAX_RUN_SPEED * 1.2)
 	jump_stage = next
 	_last_jump_stage = next
+	_jump_cut = false
 	land_timer = 0.0
 	flipping = next == 2
 	state = State.NORMAL
@@ -220,10 +253,20 @@ func _air(dir: float, wall: int, input: PlayerInput, dt: float) -> void:
 		d = 0.0
 	_horizontal(d, input, dt, Tuning.AIR_ACCEL_RATE)
 
-	var g := Tuning.GRAVITY_DOWN
-	if vel.y > 0.0:
-		g = Tuning.GRAVITY_UP if input.jump_held else Tuning.GRAVITY_CUT
-	vel.y = maxf(vel.y - g * dt, -Tuning.MAX_FALL)
+	if vel.y > 0.0 and not input.jump_held:
+		_jump_cut = true   # 離した後は頂点で浮かせない(短押しはキビキビ落ちる)
+	vel.y = maxf(vel.y - _gravity() * dt, -Tuning.MAX_FALL)
+
+
+## 速さで3区間に分かれる重力。上昇はゆっくり、頂点はふわっと、落下は重く
+func _gravity() -> float:
+	if _jump_cut:
+		return Tuning.GRAVITY_CUT if vel.y > 0.0 else Tuning.GRAVITY_DOWN
+	if vel.y > Tuning.APEX_BAND:
+		return Tuning.GRAVITY_RISE
+	if vel.y > -Tuning.APEX_BAND:
+		return Tuning.GRAVITY_APEX
+	return Tuning.GRAVITY_DOWN
 
 
 func _wall_kick(wall: int) -> void:
@@ -233,6 +276,7 @@ func _wall_kick(wall: int) -> void:
 	wall_lock = Tuning.WALL_KICK_LOCK_FRAMES
 	state = State.NORMAL
 	_last_jump_stage = -1
+	_jump_cut = false
 	events.append("wall_kick")
 
 
@@ -250,6 +294,7 @@ func stomp_bounce(jump_held: bool) -> void:
 	vel.y = Tuning.velocity_for_height(h)
 	state = State.NORMAL
 	flipping = false
+	_jump_cut = false
 	_was_on_floor = false
 
 
@@ -266,4 +311,5 @@ func reset() -> void:
 	flipping = false
 	wall_lock = 0
 	run_time = 0.0
+	_jump_cut = false
 	_was_on_floor = false

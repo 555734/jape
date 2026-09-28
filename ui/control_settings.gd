@@ -17,13 +17,16 @@ var control_mode := "stick"  ## "stick"=左スティック+右タップ / "butto
 
 ## 調整パネルの表示名(日本語)
 const LABELS := {
-	"CREEP_SPEED": "ゆっくり歩きの速さ (マス/秒)",
-	"WALK_SPEED": "歩きの最高速 (マス/秒)",
-	"MAX_RUN_SPEED": "ダッシュを続けたときの最高速",
-	"RUN_SPEED": "ダッシュの速さ (マス/秒)",
+	"CREEP_SPEED": "段1 ゆっくり歩きの速さ (マス/秒)",
+	"WALK_SPEED": "段2 歩きの速さ (マス/秒)",
+	"RUN_SPEED": "段3 ダッシュの速さ (マス/秒)",
+	"MAX_RUN_SPEED": "段4 ダッシュを続けたときの速さ",
+	"RUN_STEP_TIME": "段4に上がるまでの時間 (秒)",
 	"RUN_JUMP_HEIGHT": "助走ジャンプの高さ (マス)",
 	"STAND_JUMP_HEIGHT": "立ちジャンプの高さ (マス)",
-	"GRAVITY_UP": "上昇中の重力",
+	"GRAVITY_RISE": "上昇中の重力",
+	"GRAVITY_APEX": "頂点のふわっと感 (重力。小さいほど浮く)",
+	"APEX_BAND": "頂点とみなす速さの幅",
 	"GRAVITY_DOWN": "落下中の重力",
 	"TRIPLE_WINDOW": "3段ジャンプの猶予 (秒)",
 	"JUMP2_HEIGHT": "3段ジャンプ 2段目の高さ",
@@ -48,11 +51,14 @@ const TUNABLE := {
 	"WALL_KICK_HEIGHT": [2.0, 6.0],
 	"SKID_DECEL": [15.0, 60.0],
 	"GP_HOVER": [0.1, 0.5],
-	"GRAVITY_UP": [20.0, 90.0],
-	"GRAVITY_DOWN": [25.0, 140.0],
+	"GRAVITY_RISE": [18.0, 60.0],
+	"GRAVITY_APEX": [8.0, 40.0],
+	"APEX_BAND": [0.0, 8.0],
+	"GRAVITY_DOWN": [30.0, 140.0],
 	"WALK_SPEED": [2.0, 9.0],
 	"MAX_RUN_SPEED": [5.0, 18.0],
-	"CREEP_SPEED": [0.3, 3.0],
+	"CREEP_SPEED": [1.0, 5.0],
+	"RUN_STEP_TIME": [0.1, 1.5],
 }
 var _defaults := {}
 

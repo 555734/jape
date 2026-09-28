@@ -72,10 +72,50 @@ func test_running_jump_height_and_timing() -> void:
 		up += 1
 	var down := _until_land(PlayerInput.make(1, true, false, true))
 	assert_near(peak, Tuning.RUN_JUMP_HEIGHT, Tuning.RUN_JUMP_HEIGHT * 0.05, "助走ジャンプの高さ (マス)")
-	var t_up := sqrt(2.0 * Tuning.RUN_JUMP_HEIGHT / Tuning.GRAVITY_UP)
+	var t_up := Tuning.rise_time_for_height(Tuning.RUN_JUMP_HEIGHT)
 	assert_near(up * DT, t_up, t_up * 0.06, "上昇時間 (秒)")
-	var t_down := sqrt(2.0 * Tuning.RUN_JUMP_HEIGHT / Tuning.GRAVITY_DOWN)
-	assert_near(down * DT, t_down, t_down * 0.06, "落下時間 (秒)")
+	var t_down := Tuning.fall_time_for_height(Tuning.RUN_JUMP_HEIGHT)
+	assert_near(down * DT, t_down, t_down * 0.08, "落下時間 (秒)")
+
+
+## 重力を感じること: 上昇はゆっくり、落下はそれより早い(v5の狙い)
+func test_fall_is_faster_than_rise() -> void:
+	_fresh()
+	_run_in()
+	var up := 0
+	_frame(PlayerInput.make(1, true, true, true))
+	while m.vel.y > 0.0:
+		_frame(PlayerInput.make(1, true, false, true))
+		up += 1
+	var down := 0
+	var fastest := 0.0
+	while pos.y > 0.0 and down < 600:
+		_frame(PlayerInput.make(1, true, false, true))
+		down += 1
+		fastest = maxf(fastest, -m.vel.y)
+	assert_true(up > down, "落ちるほうが早い (上昇 %d フレーム > 落下 %d フレーム)" % [up, down])
+	assert_true(fastest > Tuning.velocity_for_height(Tuning.RUN_JUMP_HEIGHT), \
+		"落下の速さが打ち上げの速さより大きくなる (%.1f マス/秒)" % fastest)
+
+
+## 頂点でふわっと浮くこと: 同じ速さの幅を、頂点付近では上昇初期よりゆっくり通る
+func test_apex_float() -> void:
+	_fresh()
+	_run_in()
+	_frame(PlayerInput.make(1, true, true, true))
+	var v0 := m.vel.y
+	var early := 0
+	var apex := 0
+	for i in 200:
+		var v := m.vel.y
+		if v <= v0 and v > v0 - Tuning.APEX_BAND:
+			early += 1
+		if absf(v) <= Tuning.APEX_BAND:
+			apex += 1
+		_frame(PlayerInput.make(1, true, false, true))
+		if pos.y <= 0.0 and m.vel.y <= 0.0:
+			break
+	assert_true(apex > early * 2, "頂点付近で溜める (頂点 %d フレーム > 上昇初期 %d フレームの2倍)" % [apex, early])
 
 
 func test_standing_and_short_jump() -> void:
@@ -194,20 +234,36 @@ func test_stomp_bounce() -> void:
 	assert_true(m.vel.y > low, "踏んだ瞬間にジャンプを押していると高く跳ねる")
 
 
-func test_speed_steps_with_stick() -> void:
-	# スティックの倒し具合(強さ)で速さが細かく変わる
+## 横の速さが4段に刻まれていること(段1=少し倒す / 段2=大きく倒す / 段3=ダッシュ / 段4=ダッシュ継続)
+func test_four_speed_steps() -> void:
 	var speeds := []
-	for strength in [0.25, 0.5, 0.75, 1.0]:
-		_fresh()
-		_hold(PlayerInput.make(strength, false, false, false), 60)
-		speeds.append(m.vel.x)
-	assert_near(speeds[0], Tuning.CREEP_SPEED, 0.1, "少しだけ倒す=ゆっくり歩き (マス/秒)")
-	assert_true(speeds[0] < speeds[1] and speeds[1] < speeds[2] and speeds[2] < speeds[3], "倒すほど速い (%.1f / %.1f / %.1f / %.1f)" % speeds)
+	_fresh()
+	_hold(PlayerInput.make(0.3, false, false, false), 60)
+	speeds.append(m.vel.x)
+	_fresh()
+	_hold(PlayerInput.make(0.9, false, false, false), 60)
+	speeds.append(m.vel.x)
 	_fresh()
 	_hold(PlayerInput.make(1, true, false, false), 20)
-	var early := m.vel.x
+	speeds.append(m.vel.x)
 	_hold(PlayerInput.make(1, true, false, false), 60)
-	assert_true(m.vel.x > early + 1.0, "ダッシュを続けると伸びる (%.1f → %.1f)" % [early, m.vel.x])
+	speeds.append(m.vel.x)
+	assert_near(speeds[0], Tuning.CREEP_SPEED, 0.2, "段1 ゆっくり歩き (マス/秒)")
+	assert_near(speeds[1], Tuning.WALK_SPEED, 0.3, "段2 歩き (マス/秒)")
+	assert_near(speeds[2], Tuning.RUN_SPEED, 0.3, "段3 ダッシュ (マス/秒)")
+	assert_near(speeds[3], Tuning.MAX_RUN_SPEED, 0.3, "段4 ダッシュを続けたとき (マス/秒)")
+	for i in 3:
+		assert_true(speeds[i + 1] - speeds[i] >= 1.0, \
+			"段%d と段%d の差が1マス/秒以上 (%.1f → %.1f)" % [i + 1, i + 2, speeds[i], speeds[i + 1]])
+
+
+## 段の中では速さが変わらない(滑らかに伸び続けない)
+func test_speed_holds_within_a_step() -> void:
+	_fresh()
+	_hold(PlayerInput.make(0.6, false, false, false), 30)
+	var a := m.vel.x
+	_hold(PlayerInput.make(1.0, false, false, false), 30)
+	assert_near(m.vel.x, a, 0.2, "同じ段なら倒し具合を変えても速さは同じ (%.1f → %.1f)" % [a, m.vel.x])
 
 
 func test_triple_jump_speeds_up() -> void:

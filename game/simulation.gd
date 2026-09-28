@@ -201,7 +201,7 @@ class SimWalker:
 		if dead:
 			dead_left = maxi(0, dead_left - 1)
 			return
-		vy = maxf(vy - Tuning.GRAVITY_DOWN * DT, -Tuning.MAX_FALL)
+		vy = maxf(vy - Tuning.ACTOR_GRAVITY * DT, -Tuning.ACTOR_MAX_FALL)
 		if on_floor:
 			vy = 0.0
 		var r := stage.move_box(x, y, WIDTH, SIZE, dir * SPEED * DT, vy * DT)
