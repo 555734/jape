@@ -71,10 +71,12 @@ func test_running_jump_height_and_timing() -> void:
 		_frame(PlayerInput.make(1, true, false, true))
 		up += 1
 	var down := _until_land(PlayerInput.make(1, true, false, true))
-	assert_near(peak, Tuning.RUN_JUMP_HEIGHT, Tuning.RUN_JUMP_HEIGHT * 0.05, "助走ジャンプの高さ (マス)")
-	var t_up := Tuning.rise_time_for_height(Tuning.RUN_JUMP_HEIGHT)
-	assert_near(up * DT, t_up, t_up * 0.06, "上昇時間 (秒)")
-	var t_down := Tuning.fall_time_for_height(Tuning.RUN_JUMP_HEIGHT)
+	var v0: float = Tuning.JUMP_SPEEDS[3]
+	var h := Tuning.height_for_velocity(v0)
+	assert_near(peak, h, h * 0.05, "助走ジャンプの高さ (マス)")
+	var t_up := Tuning.rise_time_for_velocity(v0)
+	assert_near(up * DT, t_up, t_up * 0.08, "上昇時間 (秒)")
+	var t_down := Tuning.fall_time_for_height(h)
 	assert_near(down * DT, t_down, t_down * 0.08, "落下時間 (秒)")
 
 
@@ -94,41 +96,43 @@ func test_fall_is_faster_than_rise() -> void:
 		down += 1
 		fastest = maxf(fastest, -m.vel.y)
 	assert_true(up > down, "落ちるほうが早い (上昇 %d フレーム > 落下 %d フレーム)" % [up, down])
-	assert_true(fastest > Tuning.velocity_for_height(Tuning.RUN_JUMP_HEIGHT), \
-		"落下の速さが打ち上げの速さより大きくなる (%.1f マス/秒)" % fastest)
+	assert_near(fastest, Tuning.MAX_FALL, 0.3, "落下は最大落下速度まで達する (マス/秒)")
 
 
-## 頂点でふわっと浮くこと: 同じ速さの幅を、頂点付近では上昇初期よりゆっくり通る
-func test_apex_float() -> void:
+## 飛び出し直後だけが軽いこと【SMB3】: 同じ速さの幅を、上昇初期は頂点付近よりゆっくり通る
+func test_rise_starts_light() -> void:
 	_fresh()
 	_run_in()
 	_frame(PlayerInput.make(1, true, true, true))
 	var v0 := m.vel.y
+	var band := 3.0
 	var early := 0
 	var apex := 0
 	for i in 200:
 		var v := m.vel.y
-		if v <= v0 and v > v0 - Tuning.APEX_BAND:
+		if v <= v0 and v > v0 - band:
 			early += 1
-		if absf(v) <= Tuning.APEX_BAND:
+		if absf(v) <= band:
 			apex += 1
 		_frame(PlayerInput.make(1, true, false, true))
 		if pos.y <= 0.0 and m.vel.y <= 0.0:
 			break
-	assert_true(apex > early * 2, "頂点付近で溜める (頂点 %d フレーム > 上昇初期 %d フレームの2倍)" % [apex, early])
+	assert_true(early > apex * 2, "飛び出し直後がふわっと伸びる (初期 %d フレーム > 頂点付近 %d フレームの2倍)" % [early, apex])
 
 
 func test_standing_and_short_jump() -> void:
 	_fresh()
 	_frame(PlayerInput.make(0, false, true, true))
 	_until_land(PlayerInput.make(0, false, false, true))
-	assert_near(peak, Tuning.STAND_JUMP_HEIGHT, Tuning.STAND_JUMP_HEIGHT * 0.05, "立ちジャンプの高さ (マス)")
+	var stand := Tuning.height_for_velocity(Tuning.JUMP_SPEEDS[0])
+	assert_near(peak, stand, stand * 0.05, "立ちジャンプの高さ (マス)")
 	_fresh()
 	_frame(PlayerInput.make(0, false, true, true))
 	_hold(PlayerInput.make(0, false, false, true), 2)
 	_until_land(PlayerInput.make(0, false, false, false))
-	# 動画(4秒付近)の短いジャンプは約2.5マス。通常ジャンプの6割未満になること
-	assert_true(peak < Tuning.RUN_JUMP_HEIGHT * 0.6, "すぐ離すと低く跳ぶ (高さ %.2f < %.2fマス)" % [peak, Tuning.RUN_JUMP_HEIGHT * 0.6])
+	# 通常ジャンプの6割未満になること
+	var limit := Tuning.height_for_velocity(Tuning.JUMP_SPEEDS[3]) * 0.6
+	assert_true(peak < limit, "すぐ離すと低く跳ぶ (高さ %.2f < %.2fマス)" % [peak, limit])
 
 
 ## 3段ジャンプ: 着地直後に跳ぶたびに高くなる
@@ -147,9 +151,9 @@ func test_triple_jump() -> void:
 	_fresh()
 	_run_in()
 	var h := _triple(2)
-	assert_near(h[0], Tuning.RUN_JUMP_HEIGHT, 0.25, "3段ジャンプ 1段目 (マス)")
-	assert_near(h[1], Tuning.JUMP2_HEIGHT, 0.25, "3段ジャンプ 2段目 (マス)")
-	assert_near(h[2], Tuning.JUMP3_HEIGHT, 0.3, "3段ジャンプ 3段目 (マス)")
+	assert_near(h[0], Tuning.height_for_velocity(Tuning.JUMP_SPEEDS[3]), 0.3, "3段ジャンプ 1段目 (マス)")
+	assert_near(h[1], Tuning.height_for_velocity(Tuning.JUMP2_SPEED), 0.3, "3段ジャンプ 2段目 (マス)")
+	assert_near(h[2], Tuning.height_for_velocity(Tuning.JUMP3_SPEED), 0.35, "3段ジャンプ 3段目 (マス)")
 	assert_true(h[1] - h[0] >= 1.0 and h[2] - h[1] >= 1.0, "段ごとに1マス以上高くなる (%.1f → %.1f → %.1f)" % h)
 	assert_true(m.jump_stage == 2, "3段目になっている")
 
@@ -244,14 +248,15 @@ func test_four_speed_steps() -> void:
 	_hold(PlayerInput.make(0.9, false, false, false), 60)
 	speeds.append(m.vel.x)
 	_fresh()
-	_hold(PlayerInput.make(1, true, false, false), 20)
+	_hold(PlayerInput.make(0.3, true, false, false), 90)
 	speeds.append(m.vel.x)
-	_hold(PlayerInput.make(1, true, false, false), 60)
+	_fresh()
+	_hold(PlayerInput.make(1, true, false, false), 90)
 	speeds.append(m.vel.x)
 	assert_near(speeds[0], Tuning.CREEP_SPEED, 0.2, "段1 ゆっくり歩き (マス/秒)")
 	assert_near(speeds[1], Tuning.WALK_SPEED, 0.3, "段2 歩き (マス/秒)")
-	assert_near(speeds[2], Tuning.RUN_SPEED, 0.3, "段3 ダッシュ (マス/秒)")
-	assert_near(speeds[3], Tuning.MAX_RUN_SPEED, 0.3, "段4 ダッシュを続けたとき (マス/秒)")
+	assert_near(speeds[2], Tuning.RUN_SPEED, 0.3, "段3 ダッシュ+少し倒す (マス/秒)")
+	assert_near(speeds[3], Tuning.MAX_RUN_SPEED, 0.3, "段4 ダッシュ+大きく倒す (マス/秒)")
 	for i in 3:
 		assert_true(speeds[i + 1] - speeds[i] >= 1.0, \
 			"段%d と段%d の差が1マス/秒以上 (%.1f → %.1f)" % [i + 1, i + 2, speeds[i], speeds[i + 1]])

@@ -269,6 +269,9 @@ func _handle_events(events: Array) -> void:
 				players[ev[1]].on_move_event(ev[2])
 			"round_start":
 				_cam_ready = false   # ラウンド開始時はカメラを追いかけさせず、その場に切り替える
+			"respawn":
+				if ev[1] == cam_index:
+					_cam_ready = false   # 土管から出てきた位置へ、追いかけずに切り替える
 			"star_spawn":
 				_log("STAR SPAWN point %d at (%.1f, %.1f)" % [ev[1] + 1, sim.star_x, sim.star_y])
 			"star":
@@ -375,13 +378,14 @@ func _update_camera(dt: float) -> void:
 		target_y = feet + view * 0.5 - GROUND_MARGIN
 	if feet - bottom < CAM_BAND_LO:
 		target_y = feet - CAM_BAND_LO + view * 0.5
-		if p.velocity.y < 0.0:
-			tau = CAM_TAU_FALL   # 落下中は素早く追う
+		tau = CAM_TAU_FALL   # 画面下に近いときは素早く追う(着地して止まった直後も含む)
 	elif (bottom + view) - head < CAM_BAND_HI:
 		target_y = head + CAM_BAND_HI - view * 0.5
 		tau = CAM_TAU_FALL
 	target_y = clampf(target_y, view * 0.5 - GROUND_MARGIN, map.height - view * 0.5 + 1.0)
 	_cam_y = lerpf(_cam_y, target_y, 1.0 - exp(-dt / tau))
+	# 追従が間に合わなくても画面の外には出さない(高いジャンプの後に置いていかれないように)
+	_cam_y = clampf(_cam_y, head - view * 0.5, feet + view * 0.5)
 	camera.position = Vector3(_cam_x, _cam_y, dist)
 
 
@@ -441,7 +445,7 @@ func _soak_check() -> void:
 			bad = "ステージの外"
 		elif not p.dead and rules.invuln[i] <= 0.0 and not players[i].model_visible():
 			bad = "無敵でないのにモデルが非表示"
-		elif i == 0 and not p.dead and _time > 1.0 and sim.wait <= 0:
+		elif i == 0 and not p.dead and _time > 1.0 and sim.wait <= 0 and _cam_ready:
 			var feet_on_screen := p.y - (_cam_y - view * 0.5)
 			if p.y > -1.0 and (feet_on_screen < -0.5 or feet_on_screen > view + 0.5):
 				bad = "カメラの画面外 (足元が画面下から%.1fマス)" % feet_on_screen
