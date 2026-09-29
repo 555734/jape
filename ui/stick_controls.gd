@@ -78,19 +78,17 @@ func _refresh() -> void:
 	if v.x > WALK_AT:
 		want["move_right"] = true
 	if absf(v.x) > RUN_AT:
-		want["run"] = true
+		want["run"] = true    # 大きく倒したらダッシュ(DSのBボタン相当)
 	if v.y > DOWN_AT and v.y > absf(v.x) * 0.8:
 		want["move_down"] = true
 	if not _jump_fingers.is_empty():
 		want["jump"] = true
 
-	# 倒し具合を強さとして渡す: 歩き域(WALK_AT〜RUN_AT)を 0.25〜1 に。ゆっくり〜歩き最高速まで細かく変わる
-	var strength := clampf(0.25 + 0.75 * (absf(v.x) - WALK_AT) / (RUN_AT - WALK_AT), 0.25, 1.0)
+	# 倒し具合は速さに影響させない。原作はデジタル十字キーで、速さの段は「今の速度」から決まる。
+	# スティックがするのは「左右を押したか」「ダッシュしているか」の判定だけ(DS互換)
 	var buzz := false
 	for a in want:
-		if a == "move_left" or a == "move_right":
-			Input.action_press(a, strength)
-		elif not _state.has(a):
+		if not _state.has(a):
 			Input.action_press(a)
 		if not _state.has(a) and a in ["jump", "run", "move_down"]:
 			buzz = true

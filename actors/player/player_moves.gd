@@ -1,8 +1,8 @@
 class_name PlayerMoves
 extends RefCounted
 ## プレイヤーの動き(速度と状態)の計算。シーンに依存しないので、テストで直接動かせる。
-## 原作の動き: 歩き・ダッシュ・切り返し・ジャンプ(長押しで高く)・3段ジャンプ・
-## 壁すべり・壁キック・ヒップドロップ・しゃがみ。数値は Tuning。
+## 基準は New Super Mario Bros.(DS)。速度段・重力帯・先行入力・コヨーテタイムは原作の仕組み。
+## 数値と出典・確度は docs/nsmb_ds_physics.md、受け入れ条件は tests/test_nsmb_feel.gd。
 
 enum State { NORMAL, SKID, CROUCH, WALL_SLIDE, GROUND_POUND, GP_LAND }
 
@@ -17,6 +17,8 @@ var land_timer := 0.0
 var flipping := false        ## 3段目の宙返り中
 
 var wall_lock := 0          ## 壁キック後の入力制限(残りフレーム数)
+var jump_buffer := 0        ## 押しておいたジャンプが残っているフレーム数【NSMB DS】
+var coyote := 0             ## 足場を離れてからジャンプできる残りフレーム数【NSMB DS】
 var _gp_timer := 0.0
 var _was_on_floor := true
 var _last_jump_stage := -1   ## 直前のジャンプの段(着地まで保持)
@@ -28,7 +30,7 @@ var events: Array[String] = []
 ## 通信対戦の巻き戻し用: 状態をまるごと配列にする / 配列から戻す
 func snapshot() -> Array:
 	return [vel.x, vel.y, state, facing, big, jump_stage, land_timer, flipping, wall_lock, _gp_timer,
-		_was_on_floor, _last_jump_stage]
+		_was_on_floor, _last_jump_stage, jump_buffer, coyote]
 
 
 func restore(a: Array) -> void:
@@ -43,6 +45,8 @@ func restore(a: Array) -> void:
 	_gp_timer = a[9]
 	_was_on_floor = a[10]
 	_last_jump_stage = a[11]
+	jump_buffer = a[12]
+	coyote = a[13]
 	events.clear()
 
 
@@ -51,6 +55,17 @@ func step(on_floor: bool, wall: int, input: PlayerInput, dt: float) -> Vector2:
 	events.clear()
 	wall_lock = maxi(0, wall_lock - 1)
 	var dir := signf(input.move_x) if absf(input.move_x) > 0.1 else 0.0
+
+	# ジャンプの先行入力: 押した瞬間を覚えておき、着地したフレームで使う【NSMB DS】
+	jump_buffer = maxi(0, jump_buffer - 1)
+	if input.jump_pressed:
+		jump_buffer = Tuning.JUMP_BUFFER_FRAMES
+
+	# コヨーテタイム: 足場を離れた直後の数フレームはまだ跳べる【NSMB DS】
+	if on_floor:
+		coyote = Tuning.COYOTE_FRAMES
+	else:
+		coyote = maxi(0, coyote - 1)
 
 	if on_floor and not _was_on_floor:
 		_on_land()
@@ -94,85 +109,58 @@ func _ground(dir: float, input: PlayerInput, dt: float) -> void:
 	# しゃがみ(大きい状態のみ)
 	if big and input.down:
 		state = State.CROUCH
-		vel.x = move_toward(vel.x, 0.0, Tuning.STOP_DECEL * dt)
+		vel.x = move_toward(vel.x, 0.0, Tuning.RELEASE_DECEL * dt)
 	else:
 		if state == State.CROUCH:
 			state = State.NORMAL
-		_horizontal(dir, input, dt, 1.0)
+		_horizontal(dir, input, dt, true)
 
-	if input.jump_pressed:
+	if jump_buffer > 0:
 		_jump()
 
 
-func _horizontal(dir: float, input: PlayerInput, dt: float, rate_scale: float) -> void:
-	var top := target_speed(absf(input.move_x), input.run)
-	var accel := (Tuning.RUN_ACCEL if input.run else Tuning.WALK_ACCEL) * rate_scale
-	var on_ground := rate_scale >= 1.0
-	if dir != 0.0:
-		if vel.x != 0.0 and signf(vel.x) != dir:
-			# 逆方向に入れた: 速ければ切り返し(スキッド)
-			if on_ground and absf(vel.x) >= Tuning.SKID_MIN_SPEED:
-				if state != State.SKID:
-					events.append("skid")
-				state = State.SKID
-				vel.x = move_toward(vel.x, 0.0, Tuning.SKID_DECEL * dt)
-				return
-			vel.x = move_toward(vel.x, 0.0, (Tuning.STOP_DECEL + accel) * dt)
-		elif absf(vel.x) > top:
-			vel.x = move_toward(vel.x, dir * top, Tuning.STOP_DECEL * rate_scale * dt)
-		else:
-			vel.x = move_toward(vel.x, dir * top, accel * dt)
-		facing = dir
-		if state == State.SKID and (vel.x == 0.0 or signf(vel.x) == dir):
-			state = State.NORMAL
-	else:
+## 横移動【NSMB DS】。段は今の速度で決まり、上限段はダッシュ入力で決まる。
+## 加速表は地上・空中で同じ。スキッドと摩擦は地上のみ。
+func _horizontal(dir: float, input: PlayerInput, dt: float, on_ground: bool) -> void:
+	var speed := absf(vel.x)
+	var stage := Tuning.speed_stage(speed)
+	var max_stage: int = Tuning.RUN_STAGE if input.run else Tuning.WALK_STAGE
+	var top := Tuning.WALK_MAX_VELOCITY[max_stage]
+	var accel := Tuning.WALK_ACCEL[stage]
+
+	if dir == 0.0:
+		# 入力なし。地上では摩擦で減速する(空中では速度を保つ)
 		if on_ground:
-			vel.x = move_toward(vel.x, 0.0, Tuning.STOP_DECEL * dt)
+			vel.x = move_toward(vel.x, 0.0, Tuning.RELEASE_DECEL * dt)
 		if state == State.SKID:
 			state = State.NORMAL
+		return
+
+	facing = dir
+	if vel.x != 0.0 and signf(vel.x) != dir:
+		# 逆方向に入れた。速ければ切り返し(スキッド)、そうでなければ段ごとの減速。
+		# 一度スキッドに入ったら、速度が落ちても止まるまでスキッドのまま【NSMB DS】
+		if on_ground and (state == State.SKID or speed >= Tuning.SKID_MIN_SPEED):
+			if state != State.SKID:
+				events.append("skid")
+			state = State.SKID
+			vel.x = move_toward(vel.x, 0.0, Tuning.SKID_DECEL * dt)
+			return
+		var turn := Tuning.FAST_TURNAROUND_ACCEL if stage >= Tuning.RUN_STAGE \
+			else Tuning.TURNAROUND_ACCEL[mini(stage, Tuning.TURNAROUND_ACCEL.size() - 1)]
+		vel.x = move_toward(vel.x, 0.0, turn * dt)
+		return
+
+	if state == State.SKID:
+		state = State.NORMAL
+	if speed > top:
+		# 上限段を超えている(ダッシュを離した直後など)。摩擦で上限まで落とす
+		vel.x = move_toward(vel.x, dir * top, Tuning.RELEASE_DECEL * dt)
+	else:
+		vel.x = move_toward(vel.x, dir * top, accel * dt)
 
 
-## 入力の強さ(0〜1)とダッシュから、横の速さの段(0〜4)を決める。
-## 段は入力だけで決まる(SMB3 と同じく、押した瞬間からその段の速さへ加速する)。
-##   段0=止まっている / 段1=少し倒す / 段2=大きく倒す / 段3=ダッシュ+少し / 段4=ダッシュ+大きく
-func speed_tier(strength: float, run: bool) -> int:
-	if strength <= 0.1:
-		return 0
-	if run:
-		return 4 if strength > 0.5 else 3
-	return 1 if strength <= 0.5 else 2
-
-
-## 段に応じた速さ。段の途中の値は作らず、加速で段から段へつなぐ
-func tier_speed(tier: int) -> float:
-	match tier:
-		1:
-			return Tuning.CREEP_SPEED
-		2:
-			return Tuning.WALK_SPEED
-		3:
-			return Tuning.RUN_SPEED
-		4:
-			return Tuning.MAX_RUN_SPEED
-	return 0.0
-
-
-func target_speed(strength: float, run: bool) -> float:
-	return tier_speed(speed_tier(strength, run))
-
-
-## 今の横の速さがどの段にあたるか(ジャンプの初速を段にそろえるために使う)
-func current_tier() -> int:
-	var speed := absf(vel.x)
-	if speed >= Tuning.MAX_RUN_SPEED - 0.5:
-		return 4
-	if speed >= Tuning.RUN_SPEED - 0.5:
-		return 3
-	if speed >= Tuning.WALK_SPEED - 0.5:
-		return 2
-	return 1
-
-
+## ジャンプ【NSMB DS】。初速は横の速さで上乗せが決まる。高さは結果として出る
 func _jump() -> void:
 	var speed := absf(vel.x)
 	var next := 0
@@ -180,21 +168,19 @@ func _jump() -> void:
 		next = mini(_last_jump_stage + 1, 2)
 		if _last_jump_stage == 2:
 			next = 0   # 3段目の後は1段目に戻る
-	match next:
-		1:
-			vel.y = Tuning.JUMP2_SPEED
-		2:
-			vel.y = Tuning.JUMP3_SPEED
-		_:
-			# 横の段(1〜4)で初速を選ぶ【SMB3】。高さは初速と重力から決まる結果
-			vel.y = Tuning.jump_speed_for_tier(current_tier())
-	# 2段目・3段目は横の勢いも上乗せして、高さだけでなく速さでも差を出す
+	vel.y = Tuning.jump_velocity(vel.x)
+	if next == 2:
+		vel.y += Tuning.JUMP_TRIPLE_BONUS
+	# 2段目・3段目は横の勢いも上乗せする(猶予と倍率は Jape 独自)
+	var cap := Tuning.WALK_MAX_VELOCITY[Tuning.RUN_STAGE] * 1.2
 	if next == 1:
-		vel.x = clampf(vel.x * Tuning.JUMP2_SPEED_BOOST, -Tuning.MAX_RUN_SPEED * 1.2, Tuning.MAX_RUN_SPEED * 1.2)
+		vel.x = clampf(vel.x * Tuning.JUMP2_SPEED_BOOST, -cap, cap)
 	elif next == 2:
-		vel.x = clampf(vel.x * Tuning.JUMP3_SPEED_BOOST, -Tuning.MAX_RUN_SPEED * 1.2, Tuning.MAX_RUN_SPEED * 1.2)
+		vel.x = clampf(vel.x * Tuning.JUMP3_SPEED_BOOST, -cap, cap)
 	jump_stage = next
 	_last_jump_stage = next
+	jump_buffer = 0
+	coyote = 0
 	land_timer = 0.0
 	flipping = next == 2
 	state = State.NORMAL
@@ -228,37 +214,46 @@ func _air(dir: float, wall: int, input: PlayerInput, dt: float) -> void:
 		state = State.NORMAL
 
 	if state == State.WALL_SLIDE:
-		if input.jump_pressed:
+		if jump_buffer > 0:
 			_wall_kick(wall)
 			return
 		vel.x = float(wall) * 0.5   # 壁に接したままにする
-		vel.y = maxf(vel.y - Tuning.GRAVITY_FALL * dt, -Tuning.WALL_SLIDE_SPEED)
+		vel.y = maxf(vel.y - _gravity(input) * dt, -Tuning.MAX_FALL_WALL_SLIDE)
+		return
+
+	# 足場を離れた直後ならまだ跳べる【NSMB DS】
+	if coyote > 0 and jump_buffer > 0:
+		_jump()
 		return
 
 	# 空中の横移動。壁キック直後は壁方向の入力を無視
 	var d := dir
 	if wall_lock > 0 and d != 0.0 and d != signf(vel.x):
 		d = 0.0
-	_horizontal(d, input, dt, Tuning.AIR_ACCEL_RATE)
+	_horizontal(d, input, dt, false)
 
-	vel.y = maxf(vel.y - _gravity(input) * dt, -Tuning.MAX_FALL)
+	var limit: float = Tuning.MAX_FALL_GROUND_POUND if state == State.GROUND_POUND else Tuning.MAX_FALL
+	vel.y = maxf(vel.y - _gravity(input) * dt, -limit)
 
 
-## 重力は2値【SMB3】。勢いよく上がっている間ボタンを押していれば軽く、それ以外は重い。
-## 飛び出し直後だけがふわっとして、頂点も落下も重い(高さが時間に対して非線形になる)。
+## 重力【NSMB DS】。速度帯で5段に切り替わる。
+## 段0(勢いよく上昇中)はジャンプを押している間だけ軽く、離していれば最終段の重い値になる。
+## 頂点の直前が最も重い。
 func _gravity(input: PlayerInput) -> float:
-	if vel.y > Tuning.RISE_SPEED_THRESHOLD and input.jump_held:
-		return Tuning.GRAVITY_RISE
-	return Tuning.GRAVITY_FALL
+	var stage := Tuning.gravity_stage(vel.y)
+	if stage == 0 and not input.jump_held:
+		return Tuning.GRAVITY_ACCEL[Tuning.GRAVITY_ACCEL.size() - 1]
+	return Tuning.GRAVITY_ACCEL[stage]
 
 
 func _wall_kick(wall: int) -> void:
 	vel.x = -float(wall) * Tuning.WALL_KICK_SPEED_X
-	vel.y = Tuning.velocity_for_height(Tuning.WALL_KICK_HEIGHT)
+	vel.y = Tuning.WALL_KICK_SPEED_Y
 	facing = -float(wall)
 	wall_lock = Tuning.WALL_KICK_LOCK_FRAMES
 	state = State.NORMAL
 	_last_jump_stage = -1
+	jump_buffer = 0
 	events.append("wall_kick")
 
 
@@ -272,8 +267,7 @@ func _ground_pound(on_floor: bool, dt: float) -> void:
 
 ## 踏みつけたとき。ジャンプを押していれば高く跳ねる
 func stomp_bounce(jump_held: bool) -> void:
-	var h := Tuning.STOMP_BOUNCE_HIGH if jump_held else Tuning.STOMP_BOUNCE_LOW
-	vel.y = Tuning.velocity_for_height(h)
+	vel.y = Tuning.STOMP_BOUNCE_HIGH if jump_held else Tuning.STOMP_BOUNCE_LOW
 	state = State.NORMAL
 	flipping = false
 	_was_on_floor = false
@@ -291,4 +285,6 @@ func reset() -> void:
 	land_timer = 0.0
 	flipping = false
 	wall_lock = 0
+	jump_buffer = 0
+	coyote = 0
 	_was_on_floor = false

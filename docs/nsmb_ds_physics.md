@@ -177,7 +177,17 @@ code-ref の `JumpCurveAccelTable` が「上昇中 / 頂点の直前 / 頂点の
 | 大きい状態の高さ | 0.82 | 1.64 マス | MvsL `LargeHitboxHeight` | reimpl |
 | 幅 | — | — | — | unknown |
 
-### 4.6 計算上そうなるはずの結果（テストが実測して確かめる）
+### 4.6 実装するときに効いてくる細かい挙動
+
+| 事実 | 出典 | 確度 |
+|---|---|---|
+| 2段目のジャンプに**縦の上乗せは無い**（3段目だけ `JUMP_TRIPLE_BONUS` が乗る） | MvsL `Jump()` は `JumpState.TripleJump` のときだけ `newY += JumpTripleBonusVelocity` | reimpl |
+| スキッドは一度入ったら、速度が落ちても**止まるまでスキッドのまま** | MvsL `mario->IsSkidding` は速度が0を跨ぐか入力が向きと揃うまで保持される | reimpl |
+| ジャンプの先行入力は、ジャンプが出た時点で消費される（コヨーテも同時に0になる） | MvsL `Jump()` が `JumpBufferFrames = 0` と `CoyoteTimeFrames = 0` を両方リセット | reimpl |
+| 入力を離したときの摩擦は**地上のみ**（空中では横の速度を保つ） | MvsL `HandleWalk` の減速は接地時のみ | reimpl |
+| 接地中の重力は重力表の段0の値 | MvsL `HandleGravity` の先頭で接地時に `GravityAcceleration[0]` を入れている | reimpl |
+
+### 4.7 計算上そうなるはずの結果（テストが実測して確かめる）
 
 | 項目 | 計算値 | 確度 |
 |---|---|---|

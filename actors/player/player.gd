@@ -90,7 +90,7 @@ func _update_visual(delta: float) -> void:
 		if st == PlayerMoves.State.SKID:
 			lean = 18.0
 		else:
-			lean = -clampf(absf(velocity.x) / Tuning.RUN_SPEED, 0.0, 1.0) * 10.0
+			lean = -clampf(absf(velocity.x) / Tuning.WALK_MAX_VELOCITY[Tuning.RUN_STAGE], 0.0, 1.0) * 10.0
 	_model.rotation_degrees.z = lean * facing
 
 	# 3段目の宙返り・ヒップドロップの回転(画面の面内で1回転)
@@ -120,7 +120,7 @@ func _update_visual(delta: float) -> void:
 		_model.position.y = dip
 
 	# 砂ぼこり: ダッシュ・切り返し・壁すべり
-	var fast := is_on_floor() and absf(velocity.x) > Tuning.WALK_SPEED + 1.0
+	var fast: bool = is_on_floor() and absf(velocity.x) > Tuning.WALK_MAX_VELOCITY[Tuning.WALK_STAGE] + 1.0
 	_dust.emitting = fast or st == PlayerMoves.State.SKID or st == PlayerMoves.State.WALL_SLIDE
 	_dust.position.y = 0.05 if st != PlayerMoves.State.WALL_SLIDE else height() * 0.6
 

@@ -240,8 +240,8 @@ func test_speed_stage_caps() -> void:
 func test_jump_buffer() -> void:
 	_fresh()
 	_frame(PlayerInput.make(0, false, true, true))
-	# 落下中、着地の数フレーム前にジャンプを押して離す
-	while m.vel.y > -10.0:
+	# 上がりきって落ちてくるのを待ち、着地の少し前(猶予フレーム内)にジャンプを押して離す
+	while m.vel.y > 0.0 or pos.y > 1.2:
 		_frame(PlayerInput.make(0, false, false, true))
 	_frame(PlayerInput.make(0, false, true, true))     # 押した瞬間
 	var jumped_again := false
@@ -264,7 +264,6 @@ func test_coyote_time() -> void:
 	pos = Vector2(1.0, 1.0)
 	_hold(PlayerInput.make(1, false, false, false), 30)
 	step_x = INF        # 足場が切れた(ここから落下が始まる)
-	_frame(PlayerInput.make(1, false, false, false))
 	_frame(PlayerInput.make(1, false, false, false))
 	var before := m.vel.y
 	_frame(PlayerInput.make(1, false, true, true))

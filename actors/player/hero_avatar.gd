@@ -48,7 +48,7 @@ func _set_z(bone_name: String, degrees: float) -> void:
 func pose(state: int, grounded: bool, speed: float, delta: float) -> void:
 	if _skeleton == null:
 		return
-	var stride := clampf(absf(speed) / Tuning.RUN_SPEED, 0.0, 1.0)
+	var stride := clampf(absf(speed) / Tuning.WALK_MAX_VELOCITY[Tuning.RUN_STAGE], 0.0, 1.0)
 	var running := grounded and absf(speed) > 0.35 and state == PlayerMoves.State.NORMAL
 	_cycle += delta * (lerpf(7.0, 17.0, stride) if running else 2.0)
 	var wave := sin(_cycle)

@@ -362,7 +362,7 @@ func _update_camera(dt: float) -> void:
 		_cam_ready = true
 
 	# 横: 先読み(進行方向を少し先まで見せる。速いほど先まで)
-	var speed := clampf(absf(p.velocity.x) / Tuning.RUN_SPEED, 0.0, 1.0)
+	var speed := clampf(absf(p.velocity.x) / Tuning.WALK_MAX_VELOCITY[Tuning.RUN_STAGE], 0.0, 1.0)
 	_look = move_toward(_look, p.moves.facing * (1.0 + 1.5 * speed), dt * 6.0)
 	var target_x := _cam_x + map.delta_x(_cam_x, p.position.x) + _look
 	_cam_x = lerpf(_cam_x, target_x, 1.0 - exp(-dt / CAM_TAU_X))

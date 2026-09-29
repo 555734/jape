@@ -10,10 +10,12 @@ var jump_pressed := false  ## Aボタンを押した瞬間
 var jump_held := false     ## Aボタンを押している間
 
 
-## タッチボタン・キーボードの状態から作る
+## タッチボタン・キーボード・パッドの状態から作る。
+## move_x は VirtualController で -1 / 0 / +1 に量子化する(原作はデジタル十字キーのため)。
+## 機器ごとの物理補正は入れない。詳しくは actors/player/virtual_controller.gd
 static func from_actions() -> PlayerInput:
 	var i := PlayerInput.new()
-	i.move_x = Input.get_axis("move_left", "move_right")
+	i.move_x = VirtualController.digital_axis(Input.get_axis("move_left", "move_right"))
 	i.down = Input.is_action_pressed("move_down")
 	i.down_pressed = Input.is_action_just_pressed("move_down")
 	i.run = Input.is_action_pressed("run")

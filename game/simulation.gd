@@ -15,8 +15,8 @@ const MATCH_END_WAIT := 300     ## 試合終了後の待ち(フレーム)
 
 ## 操作キャラ。判定は横と縦の2次元だけ
 class SimPlayer:
-	const BIG_HEIGHT := 1.8     ## docs/RULES.md §2
-	const SMALL_HEIGHT := 0.9
+	const BIG_HEIGHT := 1.64    ## 【NSMB DS】docs/nsmb_ds_physics.md §4.5
+	const SMALL_HEIGHT := 0.84  ## 【NSMB DS】同上
 	const WIDTH := 0.8
 	const RESPAWN_FRAMES := 90  ## ミスしてから土管から出てくるまで(1.5秒)【決定・調整】
 
