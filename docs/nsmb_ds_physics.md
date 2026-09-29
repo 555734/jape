@@ -177,6 +177,10 @@ code-ref の `JumpCurveAccelTable` が「上昇中 / 頂点の直前 / 頂点の
 | 大きい状態の高さ | 0.82 | 1.64 マス | MvsL `LargeHitboxHeight` | reimpl |
 | 幅 | — | — | — | unknown |
 
+見た目のキャラ（`actors/player/player.gd` の `SMALL_VISUAL = 1.4`）は当たり判定（0.84マス）より
+大きいが、これは原作もそうなので直さない。NSMB の小マリオは見た目が1マスより大きく、
+当たり判定はそれより小さい。
+
 ### 4.6 実装するときに効いてくる細かい挙動
 
 | 事実 | 出典 | 確度 |
